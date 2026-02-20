@@ -1,0 +1,287 @@
+const fs = require("fs");
+const app = `import { useState, useEffect, useCallback } from "react";
+
+const CONTRACTS = {
+  registry: "0x8Fa9b010D9B30EF3112060F3Afa3c7573a0f9a17",
+  router: "0xA9c2bb95f9041922f1D4ad50C90dc9e881b765Cc",
+  launchpad: "0x3b5Cb24E7cf42a8a4405968c81D257Ca71B6Aa10",
+  realmToken: "0xBA2cA14375b2cECA4f04350Bd014B375Bc014ad2",
+};
+const BASE_CHAIN_ID = "0x2105";
+
+function LogoIcon({ size = 32 }) {
+  const nodes = [{x1:0,y1:-28,x2:0,y2:-52,cx:0,cy:-56},{x1:24,y1:-14,x2:44,y2:-28,cx:47,cy:-30},{x1:24,y1:14,x2:44,y2:28,cx:47,cy:30},{x1:0,y1:28,x2:0,y2:52,cx:0,cy:56},{x1:-24,y1:14,x2:-44,y2:28,cx:-47,cy:30},{x1:-24,y1:-14,x2:-44,y2:-28,cx:-47,cy:-30}];
+  return (
+    <svg viewBox="0 0 512 512" width={size} height={size} style={{ borderRadius: size * 0.19 }}>
+      <defs>
+        <linearGradient id="lg" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stopColor="#7c3aed"/><stop offset="50%" stopColor="#6d28d9"/><stop offset="100%" stopColor="#06b6d4"/></linearGradient>
+        <linearGradient id="cg" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stopColor="#c4b5fd" stopOpacity="0.9"/><stop offset="100%" stopColor="#67e8f9" stopOpacity="0.9"/></linearGradient>
+      </defs>
+      <rect x="16" y="16" width="480" height="480" rx="96" ry="96" fill="url(#lg)"/>
+      <g transform="translate(256,220)">
+        <polygon points="0,-100 87,-50 87,50 0,100 -87,50 -87,-50" fill="none" stroke="url(#cg)" strokeWidth="3" opacity="0.4"/>
+        <polygon points="0,-70 61,-35 61,35 0,70 -61,35 -61,-35" fill="rgba(255,255,255,0.05)" stroke="url(#cg)" strokeWidth="2" opacity="0.6"/>
+        <circle cx="0" cy="0" r="28" fill="white" opacity="0.95"/><circle cx="0" cy="0" r="22" fill="url(#lg)" opacity="0.9"/>
+        <text x="0" y="8" textAnchor="middle" fontFamily="Arial,sans-serif" fontWeight="bold" fontSize="28" fill="white">R</text>
+        {nodes.map((n,i)=>(<g key={i}><line x1={n.x1} y1={n.y1} x2={n.x2} y2={n.y2} stroke="white" strokeWidth="2" opacity="0.7"/><circle cx={n.cx} cy={n.cy} r="5" fill="white" opacity="0.8"/></g>))}
+      </g>
+    </svg>
+  );
+}
+
+function DisclaimerModal({ onAccept }) {
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+      <div className="bg-gray-900 border border-gray-700 rounded-2xl max-w-lg w-full max-h-[85vh] overflow-y-auto p-6">
+        <div className="flex items-center gap-3 mb-4"><LogoIcon size={36}/><h2 className="text-white font-bold text-xl">RealmAgents</h2></div>
+        <h3 className="text-yellow-400 font-semibold text-sm uppercase tracking-wider mb-3">Important Disclaimers</h3>
+        <div className="space-y-3 text-gray-300 text-sm leading-relaxed">
+          <div className="p-3 rounded-lg bg-red-950 border border-red-900"><p className="text-red-400 font-semibold mb-1">Risk Warning</p><p>Interacting with smart contracts and digital assets involves significant risk, including the possible loss of all funds. Only invest what you can afford to lose.</p></div>
+          <div className="p-3 rounded-lg bg-yellow-950 border border-yellow-900"><p className="text-yellow-400 font-semibold mb-1">No Financial Advice</p><p>Nothing on this platform constitutes financial, investment, legal, or tax advice. Token prices are volatile and speculative. Consult a licensed professional.</p></div>
+          <div className="p-3 rounded-lg bg-blue-950 border border-blue-900"><p className="text-blue-400 font-semibold mb-1">Smart Contract Risk</p><p>Contracts are on Base L2 and immutable. They have not undergone a formal third-party security audit. Bugs or exploits may exist.</p></div>
+          <div className="p-3 rounded-lg bg-violet-950 border border-violet-900"><p className="text-violet-400 font-semibold mb-1">Regulatory Notice</p><p>This platform is experimental. It may not be legal in all jurisdictions. Users are solely responsible for compliance with local laws.</p></div>
+          <div className="p-3 rounded-lg bg-gray-800 border border-gray-700"><p className="text-gray-400 font-semibold mb-1">No Warranty</p><p>Provided as-is without warranty. Developers and RealmDAO are not liable for any damages.</p></div>
+        </div>
+        <button onClick={onAccept} className="w-full mt-6 py-3 rounded-xl bg-gradient-to-r from-violet-600 to-violet-500 text-white font-medium hover:shadow-lg hover:shadow-violet-500/25 transition-all">I Understand and Accept the Risks</button>
+        <p className="text-gray-600 text-xs text-center mt-3">By proceeding, you acknowledge these disclaimers.</p>
+      </div>
+    </div>
+  );
+}
+
+function DisclaimerBanner() {
+  const [dismissed, setDismissed] = useState(false);
+  if (dismissed) return null;
+  return (
+    <div className="bg-yellow-950 border-b border-yellow-900 px-4 py-2 flex items-center justify-between">
+      <p className="text-yellow-400/80 text-xs">Experimental DeFi protocol. Smart contracts are unaudited. Use at your own risk. Not financial advice.</p>
+      <button onClick={() => setDismissed(true)} className="text-yellow-500/60 hover:text-yellow-400 text-xs ml-4 shrink-0">Dismiss</button>
+    </div>
+  );
+}
+
+function TxDisclaimer({ action }) {
+  return (<div className="p-3 rounded-lg bg-gray-800/50 border border-gray-700 mt-4"><p className="text-gray-500 text-xs leading-relaxed">By clicking &quot;{action}&quot;, you confirm you understand the risks. Transactions are irreversible. Not financial advice.</p></div>);
+}
+
+function NavBar({ account, onConnect, activeSection, setActiveSection }) {
+  return (
+    <div className="flex items-center justify-between px-6 py-3 bg-gray-950 border-b border-gray-800 sticky top-0 z-50">
+      <div className="flex items-center gap-8">
+        <button onClick={() => setActiveSection("home")} className="flex items-center gap-2.5 hover:opacity-80 transition-opacity"><LogoIcon size={32}/><span className="text-white font-bold text-lg">RealmAgents</span></button>
+        <div className="flex gap-1">
+          {["home","explore","launch","stake"].map(s=>(<button key={s} onClick={()=>setActiveSection(s)} className={"px-3 py-1.5 rounded-lg text-sm font-medium capitalize transition-colors "+(activeSection===s?"bg-violet-600 text-white":"text-gray-400 hover:text-white hover:bg-gray-800")}>{s}</button>))}
+        </div>
+      </div>
+      <div className="flex items-center gap-3">
+        <a href={"https://basescan.org/address/"+CONTRACTS.registry} target="_blank" rel="noreferrer" className="text-gray-500 hover:text-gray-300 text-xs">Base Mainnet</a>
+        <button onClick={onConnect} className={"px-4 py-2 rounded-lg text-sm font-medium transition-all "+(account?"bg-gray-800 text-gray-300 border border-gray-700":"bg-gradient-to-r from-violet-600 to-cyan-500 text-white hover:shadow-lg hover:shadow-violet-500/25")}>
+          {account ? account.slice(0,6)+"..."+account.slice(-4) : "Connect Wallet"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function HeroSection({ onConnect, account, setActiveSection }) {
+  return (
+    <div className="relative overflow-hidden">
+      <div className="absolute inset-0 bg-gradient-to-b from-violet-950/40 via-gray-950 to-gray-950"/>
+      <div className="absolute top-20 left-1/2 -translate-x-1/2 w-96 h-96 bg-violet-600/20 rounded-full blur-3xl"/>
+      <div className="absolute top-40 left-1/3 w-64 h-64 bg-cyan-500/10 rounded-full blur-3xl"/>
+      <div className="relative max-w-4xl mx-auto px-6 py-20 text-center">
+        <div className="flex justify-center mb-6"><LogoIcon size={80}/></div>
+        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-violet-500/10 border border-violet-500/20 text-violet-400 text-xs font-medium mb-6"><span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse"/>Live on Base L2</div>
+        <h1 className="text-5xl font-bold text-white mb-4 leading-tight">The AI Agent<br/><span className="bg-gradient-to-r from-violet-400 to-cyan-400 bg-clip-text text-transparent">Launchpad</span></h1>
+        <p className="text-gray-400 text-lg mb-10 max-w-xl mx-auto">Register, launch, and monetize AI agents on-chain. Each agent gets its own token with bonding curve pricing, powered by $REALM.</p>
+        <div className="flex gap-4 justify-center mb-16">
+          <button onClick={()=>account?setActiveSection("launch"):onConnect()} className="px-6 py-3 rounded-xl bg-gradient-to-r from-violet-600 to-violet-500 text-white font-medium hover:shadow-lg hover:shadow-violet-500/25 transition-all">{account?"Launch an Agent":"Connect to Start"}</button>
+          <button onClick={()=>setActiveSection("explore")} className="px-6 py-3 rounded-xl bg-gray-800 text-gray-300 font-medium hover:bg-gray-700 border border-gray-700 transition-all">Explore Agents</button>
+        </div>
+        <div className="grid grid-cols-3 gap-8 max-w-lg mx-auto">
+          {[{l:"Total Supply",v:"100M $REALM"},{l:"Revenue Split",v:"70/20/10"},{l:"Network",v:"Base L2"}].map(s=>(<div key={s.l}><div className="text-2xl font-bold text-white">{s.v}</div><div className="text-gray-500 text-sm">{s.l}</div></div>))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FeaturesSection() {
+  return (
+    <div className="max-w-4xl mx-auto px-6 py-16">
+      <h2 className="text-2xl font-bold text-white text-center mb-12">How It Works</h2>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {[{i:"\\u{1F916}",t:"Agent Registry",d:"Register AI agents as ERC-721 NFTs with on-chain identity, reputation tracking, and verification."},{i:"\\u{1F4C8}",t:"Bonding Curves",d:"Each agent gets its own sub-token with linear bonding curve pricing. Early supporters get the best price."},{i:"\\u{1F4B0}",t:"Revenue Router",d:"Automatic distribution: 70% creators, 20% stakers, 10% DAO treasury. 2% burn on all transactions."},{i:"\\u{1F512}",t:"DAO Governed",d:"All contracts owned by RealmDAO v3. Upgrades and parameters controlled by $REALM holders."}].map(f=>(
+          <div key={f.t} className="p-6 rounded-2xl bg-gray-900/50 border border-gray-800 hover:border-gray-700 transition-colors">
+            <span className="text-3xl mb-3 block">{f.i}</span><h3 className="text-white font-semibold mb-2">{f.t}</h3><p className="text-gray-400 text-sm leading-relaxed">{f.d}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ContractsSection() {
+  return (
+    <div className="max-w-4xl mx-auto px-6 py-12">
+      <h3 className="text-sm font-medium text-gray-500 uppercase tracking-wider mb-4 text-center">Contracts on Base</h3>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        {[{n:"AgentRegistry",a:CONTRACTS.registry},{n:"RevenueRouter",a:CONTRACTS.router},{n:"AgentLaunchpad",a:CONTRACTS.launchpad},{n:"$REALM Token",a:CONTRACTS.realmToken}].map(c=>(
+          <a key={c.n} href={"https://basescan.org/address/"+c.a} target="_blank" rel="noreferrer" className="flex items-center justify-between p-3 rounded-xl bg-gray-900/30 border border-gray-800 hover:border-violet-500/30 transition-colors group">
+            <span className="text-gray-300 text-sm font-medium">{c.n}</span><span className="text-gray-600 text-xs font-mono group-hover:text-violet-400 transition-colors">{c.a.slice(0,6)}...{c.a.slice(-4)}</span>
+          </a>
+        ))}
+      </div>
+      <p className="text-gray-600 text-xs text-center mt-4">Contracts are immutable and owned by RealmDAO v3. Not formally audited.</p>
+    </div>
+  );
+}
+
+function ExploreSection() {
+  const agents=[{id:1,name:"TradingBot Alpha",creator:"0x1234...5678",rep:850,verified:true,hasToken:true,price:"0.0042"},{id:2,name:"ContentWriter AI",creator:"0xabcd...ef01",rep:620,verified:false,hasToken:true,price:"0.0018"},{id:3,name:"DataAnalyzer Pro",creator:"0x9876...5432",rep:1200,verified:true,hasToken:false,price:"-"}];
+  return (
+    <div className="max-w-4xl mx-auto px-6 py-12">
+      <div className="flex items-center justify-between mb-8"><h2 className="text-2xl font-bold text-white">Explore Agents</h2>
+        <div className="flex gap-2">{["All","Verified","New"].map((t,i)=>(<button key={t} className={"px-3 py-1.5 rounded-lg text-sm "+(i===0?"bg-violet-600 text-white":"bg-gray-800 text-gray-400 hover:text-white")}>{t}</button>))}</div>
+      </div>
+      <div className="space-y-3">
+        {agents.map(a=>(
+          <div key={a.id} className="p-4 rounded-xl bg-gray-900/50 border border-gray-800 hover:border-gray-700 transition-colors flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-600 to-cyan-500 flex items-center justify-center text-white font-bold">{"#"+a.id}</div>
+              <div><div className="flex items-center gap-2"><span className="text-white font-medium">{a.name}</span>{a.verified&&<span className="px-1.5 py-0.5 rounded text-xs bg-green-950 text-green-400 border border-green-900">Verified</span>}</div><span className="text-gray-500 text-xs">by {a.creator}</span></div>
+            </div>
+            <div className="flex items-center gap-6">
+              <div className="text-right"><div className="text-gray-400 text-xs">Reputation</div><div className="text-white font-medium">{a.rep}</div></div>
+              <div className="text-right"><div className="text-gray-400 text-xs">Token Price</div><div className="text-white font-medium">{a.hasToken?a.price+" REALM":"No token"}</div></div>
+              {a.hasToken&&<button className="px-4 py-2 rounded-lg bg-violet-600/20 text-violet-400 text-sm hover:bg-violet-600/30 border border-violet-500/20">Buy</button>}
+            </div>
+          </div>
+        ))}
+      </div>
+      <p className="text-gray-600 text-xs text-center mt-6">Agent tokens are speculative. Prices can go to zero. DYOR.</p>
+    </div>
+  );
+}
+
+function LaunchSection({ account }) {
+  const [form, setForm] = useState({name:"",metadata:"",tokenName:"",tokenSymbol:"",basePrice:"0.001",slope:"0.0001"});
+  const [step, setStep] = useState(1);
+  const set = (k,v) => setForm(p=>({...p,[k]:v}));
+  if (!account) return (<div className="max-w-2xl mx-auto px-6 py-16 text-center"><div className="p-12 rounded-2xl bg-gray-900/30 border border-gray-800"><span className="text-4xl mb-4 block">\\u{1F517}</span><h2 className="text-xl font-bold text-white mb-2">Connect Wallet</h2><p className="text-gray-400">Connect your wallet to register and launch AI agents.</p></div></div>);
+  return (
+    <div className="max-w-2xl mx-auto px-6 py-12">
+      <h2 className="text-2xl font-bold text-white mb-2">Launch an Agent</h2>
+      <p className="text-gray-400 mb-8">Register your AI agent and launch its token with a bonding curve.</p>
+      <div className="flex gap-3 mb-8">{[1,2].map(s=>(<button key={s} onClick={()=>setStep(s)} className={"flex-1 py-2 rounded-lg text-sm font-medium transition-colors "+(step===s?"bg-violet-600 text-white":s<step?"bg-green-600/20 text-green-400 border border-green-500/20":"bg-gray-800 text-gray-500")}>{s===1?"1. Register Agent":"2. Launch Token"}</button>))}</div>
+      {step===1&&(<div className="space-y-4">
+        <div><label className="block text-gray-400 text-sm mb-1.5">Agent Name</label><input type="text" value={form.name} onChange={e=>set("name",e.target.value)} placeholder="e.g. TradingBot Alpha" className="w-full px-4 py-3 rounded-xl bg-gray-900 border border-gray-700 text-white placeholder-gray-600 focus:outline-none focus:border-violet-500"/></div>
+        <div><label className="block text-gray-400 text-sm mb-1.5">Metadata URI</label><input type="text" value={form.metadata} onChange={e=>set("metadata",e.target.value)} placeholder="ipfs://... or https://..." className="w-full px-4 py-3 rounded-xl bg-gray-900 border border-gray-700 text-white placeholder-gray-600 focus:outline-none focus:border-violet-500"/></div>
+        <div className="p-3 rounded-xl bg-yellow-950 border border-yellow-900"><p className="text-yellow-400 text-sm">Registration requires 100 REALM tokens.</p></div>
+        <button className="w-full py-3 rounded-xl bg-gradient-to-r from-violet-600 to-violet-500 text-white font-medium hover:shadow-lg hover:shadow-violet-500/25 transition-all">Register Agent (100 REALM)</button>
+        <TxDisclaimer action="Register Agent"/>
+      </div>)}
+      {step===2&&(<div className="space-y-4">
+        <div className="grid grid-cols-2 gap-4">
+          <div><label className="block text-gray-400 text-sm mb-1.5">Token Name</label><input type="text" value={form.tokenName} onChange={e=>set("tokenName",e.target.value)} placeholder="e.g. TradingBot Token" className="w-full px-4 py-3 rounded-xl bg-gray-900 border border-gray-700 text-white placeholder-gray-600 focus:outline-none focus:border-violet-500"/></div>
+          <div><label className="block text-gray-400 text-sm mb-1.5">Symbol</label><input type="text" value={form.tokenSymbol} onChange={e=>set("tokenSymbol",e.target.value)} placeholder="e.g. TBOT" className="w-full px-4 py-3 rounded-xl bg-gray-900 border border-gray-700 text-white placeholder-gray-600 focus:outline-none focus:border-violet-500"/></div>
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <div><label className="block text-gray-400 text-sm mb-1.5">Base Price (REALM)</label><input type="text" value={form.basePrice} onChange={e=>set("basePrice",e.target.value)} className="w-full px-4 py-3 rounded-xl bg-gray-900 border border-gray-700 text-white focus:outline-none focus:border-violet-500"/></div>
+          <div><label className="block text-gray-400 text-sm mb-1.5">Slope</label><input type="text" value={form.slope} onChange={e=>set("slope",e.target.value)} className="w-full px-4 py-3 rounded-xl bg-gray-900 border border-gray-700 text-white focus:outline-none focus:border-violet-500"/></div>
+        </div>
+        <div className="p-4 rounded-xl bg-gray-900/50 border border-gray-800">
+          <h4 className="text-gray-400 text-xs uppercase tracking-wider mb-3">Bonding Curve Preview</h4>
+          <div className="h-32 flex items-end gap-0.5">{Array.from({length:30},(_,i)=>{var s=i*1000;var p=parseFloat(form.basePrice||0)+s*parseFloat(form.slope||0);var m=parseFloat(form.basePrice||0)+29000*parseFloat(form.slope||0);var h=m>0?(p/m)*100:2;return(<div key={i} className="flex-1 bg-gradient-to-t from-violet-600 to-cyan-400 rounded-t opacity-70" style={{height:Math.max(h,2)+"%"}}/>);})}</div>
+          <div className="flex justify-between mt-2 text-gray-600 text-xs"><span>Supply: 0</span><span>{"Price = "+form.basePrice+" + supply x "+form.slope}</span><span>30,000</span></div>
+        </div>
+        <div className="p-3 rounded-lg bg-red-950 border border-red-900"><p className="text-red-400/80 text-xs">Bonding curve parameters are permanent. Token price can decrease. This is not an investment.</p></div>
+        <button className="w-full py-3 rounded-xl bg-gradient-to-r from-cyan-600 to-cyan-500 text-white font-medium hover:shadow-lg hover:shadow-cyan-500/25 transition-all">Launch Agent Token</button>
+        <TxDisclaimer action="Launch Agent Token"/>
+      </div>)}
+    </div>
+  );
+}
+
+function StakeSection({ account }) {
+  const [agentId, setAgentId] = useState("");
+  const [amount, setAmount] = useState("");
+  const [tab, setTab] = useState("stake");
+  if (!account) return (<div className="max-w-2xl mx-auto px-6 py-16 text-center"><div className="p-12 rounded-2xl bg-gray-900/30 border border-gray-800"><span className="text-4xl mb-4 block">\\u{1F4CA}</span><h2 className="text-xl font-bold text-white mb-2">Connect Wallet</h2><p className="text-gray-400">Connect your wallet to stake REALM and earn rewards.</p></div></div>);
+  return (
+    <div className="max-w-2xl mx-auto px-6 py-12">
+      <h2 className="text-2xl font-bold text-white mb-2">Stake & Earn</h2>
+      <p className="text-gray-400 mb-8">Stake REALM on agents to earn 20% of their revenue.</p>
+      <div className="flex gap-2 mb-6">{["stake","unstake","claim"].map(t=>(<button key={t} onClick={()=>setTab(t)} className={"px-4 py-2 rounded-lg text-sm font-medium capitalize transition-colors "+(tab===t?"bg-violet-600 text-white":"bg-gray-800 text-gray-400 hover:text-white")}>{t}</button>))}</div>
+      <div className="p-6 rounded-2xl bg-gray-900/50 border border-gray-800 space-y-4">
+        <div><label className="block text-gray-400 text-sm mb-1.5">Agent ID</label><input type="number" value={agentId} onChange={e=>setAgentId(e.target.value)} placeholder="e.g. 1" className="w-full px-4 py-3 rounded-xl bg-gray-900 border border-gray-700 text-white placeholder-gray-600 focus:outline-none focus:border-violet-500"/></div>
+        {tab!=="claim"&&<div><label className="block text-gray-400 text-sm mb-1.5">Amount (REALM)</label><input type="text" value={amount} onChange={e=>setAmount(e.target.value)} placeholder="e.g. 1000" className="w-full px-4 py-3 rounded-xl bg-gray-900 border border-gray-700 text-white placeholder-gray-600 focus:outline-none focus:border-violet-500"/></div>}
+        <button className={"w-full py-3 rounded-xl bg-gradient-to-r from-violet-600 to-violet-500 text-white font-medium hover:shadow-lg hover:shadow-violet-500/25 transition-all capitalize"}>{tab==="claim"?"Claim Rewards":tab+" REALM"}</button>
+        <TxDisclaimer action={tab==="claim"?"Claim Rewards":tab.charAt(0).toUpperCase()+tab.slice(1)+" REALM"}/>
+      </div>
+      <div className="mt-8 p-6 rounded-2xl bg-gray-900/30 border border-gray-800">
+        <h3 className="text-white font-semibold mb-4">Revenue Distribution</h3>
+        <div className="space-y-3">{[{l:"Creator",p:70,c:"bg-violet-500"},{l:"Stakers",p:20,c:"bg-cyan-500"},{l:"DAO Treasury",p:10,c:"bg-green-500"}].map(x=>(<div key={x.l} className="flex items-center gap-3"><span className="text-gray-400 text-sm w-24">{x.l}</span><div className="flex-1 h-2 bg-gray-800 rounded-full overflow-hidden"><div className={x.c+" h-full rounded-full"} style={{width:x.p+"%"}}/></div><span className="text-gray-300 text-sm w-10 text-right">{x.p}%</span></div>))}</div>
+        <p className="text-gray-600 text-xs mt-3">+ 2% burn on all transactions</p>
+      </div>
+      <div className="p-3 rounded-lg bg-yellow-950 border border-yellow-900 mt-4"><p className="text-yellow-400/70 text-xs">Staking rewards depend on agent revenue. No guaranteed return. Subject to smart contract risk.</p></div>
+    </div>
+  );
+}
+
+function Footer() {
+  return (
+    <div className="border-t border-gray-800 mt-16">
+      <div className="max-w-4xl mx-auto px-6 py-8">
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-2.5"><LogoIcon size={24}/><span className="text-gray-500 text-sm font-medium">RealmAgents</span></div>
+          <div className="flex gap-6">
+            <a href="https://github.com/mike-warlet/realmagents" target="_blank" rel="noreferrer" className="text-gray-500 hover:text-gray-300 text-sm">GitHub</a>
+            <a href={"https://basescan.org/address/"+CONTRACTS.registry} target="_blank" rel="noreferrer" className="text-gray-500 hover:text-gray-300 text-sm">BaseScan</a>
+            <a href="#" className="text-gray-500 hover:text-gray-300 text-sm">Docs</a>
+          </div>
+        </div>
+        <div className="border-t border-gray-800/50 pt-6 space-y-2">
+          <p className="text-gray-600 text-xs leading-relaxed">RealmAgents is an experimental, decentralized protocol on Base L2. Smart contracts have not been formally audited. $REALM and agent tokens are not securities and carry no promise of returns. Nothing on this site constitutes financial, legal, or investment advice.</p>
+          <p className="text-gray-600 text-xs leading-relaxed">By using this platform you accept full responsibility for your transactions. Governed by RealmDAO v3. All interactions are final and irreversible.</p>
+          <p className="text-gray-700 text-xs mt-4">\\u00A9 2025 RealmAgents \\u2014 Powered by $REALM on Base L2</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function App() {
+  const [account, setAccount] = useState(null);
+  const [section, setSection] = useState("home");
+  const [accepted, setAccepted] = useState(false);
+
+  const connect = useCallback(async () => {
+    if (window.ethereum) {
+      try {
+        const accs = await window.ethereum.request({ method: "eth_requestAccounts" });
+        setAccount(accs[0]);
+        try { await window.ethereum.request({ method: "wallet_switchEthereumChain", params: [{ chainId: BASE_CHAIN_ID }] }); }
+        catch (e) { if (e.code===4902) await window.ethereum.request({ method: "wallet_addEthereumChain", params: [{ chainId: BASE_CHAIN_ID, chainName: "Base", nativeCurrency: { name: "ETH", symbol: "ETH", decimals: 18 }, rpcUrls: ["https://mainnet.base.org"], blockExplorerUrls: ["https://basescan.org"] }] }); }
+      } catch (err) { console.error(err); }
+    } else { alert("Please install MetaMask"); }
+  }, []);
+
+  useEffect(() => { if (window.ethereum) window.ethereum.on("accountsChanged", a => setAccount(a[0]||null)); }, []);
+
+  return (
+    <div className="min-h-screen bg-gray-950 text-gray-100">
+      {!accepted && <DisclaimerModal onAccept={() => setAccepted(true)}/>}
+      <DisclaimerBanner/>
+      <NavBar account={account} onConnect={connect} activeSection={section} setActiveSection={setSection}/>
+      {section==="home"&&<><HeroSection account={account} onConnect={connect} setActiveSection={setSection}/><FeaturesSection/><ContractsSection/></>}
+      {section==="explore"&&<ExploreSection/>}
+      {section==="launch"&&<LaunchSection account={account}/>}
+      {section==="stake"&&<StakeSection account={account}/>}
+      <Footer/>
+    </div>
+  );
+}
+`;
+fs.writeFileSync("src/App.jsx", app);
+console.log("App.jsx criado com sucesso! (" + app.length + " chars)");
