@@ -140,20 +140,20 @@ function ApiDataModal({ data, agent }) {
       <div className="grid grid-cols-2 gap-3">
         <div className="bg-gray-800/50 rounded-xl p-3">
           <div className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Agent</div>
-          <div className="text-white text-sm">{data.agent || agent.name}</div>
+          <div className="text-white text-sm">{typeof data.agent === "string" ? data.agent : (data.agent?.name || agent.name)}</div>
         </div>
         <div className="bg-gray-800/50 rounded-xl p-3">
           <div className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Status</div>
           <div className="flex items-center gap-1.5">
             <span className="w-2 h-2 rounded-full bg-green-500" />
-            <span className="text-green-400 text-sm">{data.status || "active"}</span>
+            <span className="text-green-400 text-sm">{typeof data.status === "string" ? data.status : "active"}</span>
           </div>
         </div>
       </div>
       {data.tier && (
         <div className="bg-gray-800/50 rounded-xl p-3">
           <div className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Access Tier</div>
-          <div className="text-yellow-400 text-sm font-semibold capitalize">{data.tier}</div>
+          <div className="text-yellow-400 text-sm font-semibold capitalize">{typeof data.tier === "string" ? data.tier : String(data.tier || "")}</div>
         </div>
       )}
       {entries.length > 0 && (
