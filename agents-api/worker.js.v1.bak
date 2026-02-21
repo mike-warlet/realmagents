@@ -1,0 +1,672 @@
+/**
+ * RealmAgents API Worker v2.0
+ * Enhanced with: Fear & Greed Index, DeFiLlama expanded, Nansen Smart Money
+ * Free APIs: DeFiLlama, Alternative.me, CoinGecko (fallback), Alchemy RPC
+ * Premium APIs: Nansen (when NANSEN_API_KEY is set)
+ */
+
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type",
+  "Content-Type": "application/json",
+};
+
+// ─── Known Address Labels (free, no API needed) ─────────────
+const KNOWN_ADDRESSES = {
+  "0x3154cf16ccdb4c6d922629664174b904d80f2c35": "Binance 3",
+  "0xf977814e90da44bfa03b6295a0616a897441acec": "Binance 8",
+  "0x28c6c06298d514db089934071355e5743bf21d60": "Binance 14",
+  "0xdfd5293d8e347dfe59e90efd55b2956a1343963d": "Binance 16",
+  "0x21a31ee1afc51d94c2efccaa2043aad3dcad7462": "Binance 22",
+  "0x56eddb7aa87536c09ccc2793473599fd21a8b17f": "Binance 39",
+  "0xa9d1e08c7793af67e9d92fe308d5697fb81d3e43": "Coinbase 10",
+  "0x503828976d22510aad0201ac7ec88293211d23da": "Coinbase 2",
+  "0xddfabcdc4d8ffc6d5beaf154f18b778f892a0740": "Coinbase 3",
+  "0x71660c4005ba85c37ccec55d0c4493e66fe775d3": "Coinbase 4",
+  "0xa090e606e30bd747d4e6245a1517ebe430f0057e": "Coinbase 5",
+  "0xbe0eb53f46cd790cd13851d5eff43d12404d33e8": "Binance 7",
+  "0x0d0707963952f2fba59dd06f2b425ace40b492fe": "Gate.io",
+  "0x1ab4973a48dc892cd9971ece8e01dcc7688f8f23": "Gate.io 2",
+  "0x2faf487a4414fe77e2327f0bf4ae2a264a776ad2": "FTX Exchange",
+  "0x267be1c1d684f78cb4f6a176c4911b741e4ffdc0": "Kraken 4",
+  "0xae2d4617c862309a3d75a0ffb358c7a5009c673f": "Kraken 10",
+  "0x0a4c79ce84202b03e95b7a692e5d728d83c44c76": "KuCoin",
+  "0xd6216fc19db775df9774a6e33526131da7d19a2c": "KuCoin 2",
+  "0xba12222222228d8ba445958a75a0704d566bf2c8": "Balancer Vault",
+  "0x2796317b0ff8538f253012862c06787adfb8ceb6": "Uniswap v3 Base",
+  "0x4200000000000000000000000000000000000006": "WETH (Base)",
+  "0x0000000000000000000000000000000000000000": "Null (Mint)",
+  "0x000000000000000000000000000000000000dead": "Burn Address",
+  "0x4200000000000000000000000000000000000010": "Base Bridge",
+  "0x4200000000000000000000000000000000000007": "Base L1→L2 Bridge",
+  "0x49048044d57e1c92a77f79988d21fa8faf74e97e": "Base Portal",
+};
+
+function labelAddress(addr) {
+  const lower = addr.toLowerCase();
+  return KNOWN_ADDRESSES[lower] || null;
+}
+
+// ─── Agent Metadata ─────────────────────────────────────────
+
+const AGENT_METADATA = [
+  {
+    name: "Yield Optimizer",
+    description: "Monitors and ranks the best DeFi yield opportunities on Base L2. Analyzes APY, TVL, risk scores, IL risk, and protocol health with historical trend data.",
+    image: "https://realmagents.io/agents/yield-optimizer.svg",
+    category: "DEFI",
+    capabilities: ["yield_monitoring", "risk_assessment", "apy_trends", "portfolio_optimization"],
+    version: "2.0.0",
+    chain: "base",
+    status: "active"
+  },
+  {
+    name: "Sentiment Analyzer",
+    description: "Multi-source market sentiment analysis combining Fear & Greed Index, price momentum, market breadth, and on-chain metrics for actionable trading insights.",
+    image: "https://realmagents.io/agents/sentiment-analyzer.svg",
+    category: "ANALYTICS",
+    capabilities: ["fear_greed_index", "sentiment_scoring", "market_analysis", "trend_detection"],
+    version: "2.0.0",
+    chain: "base",
+    status: "active"
+  },
+  {
+    name: "Whale Tracker",
+    description: "Tracks large $REALM and WETH transfers on Base L2 and Ethereum. Labels known addresses (exchanges, bridges, smart money) and detects accumulation/distribution patterns.",
+    image: "https://realmagents.io/agents/whale-tracker.svg",
+    category: "ANALYTICS",
+    capabilities: ["whale_detection", "address_labeling", "smart_money_tracking", "multi_chain_monitoring"],
+    version: "2.0.0",
+    chain: "base",
+    status: "active"
+  }
+];
+
+// ─── Utility ────────────────────────────────────────────────
+
+async function fetchWithTimeout(url, opts = {}, timeoutMs = 8000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { ...opts, signal: controller.signal });
+    clearTimeout(timer);
+    return res;
+  } catch (e) {
+    clearTimeout(timer);
+    throw e;
+  }
+}
+
+// ─── 1. Yield Optimizer (DeFiLlama Enhanced) ────────────────
+
+async function fetchYieldData() {
+  try {
+    const res = await fetchWithTimeout("https://yields.llama.fi/pools");
+    const data = await res.json();
+
+    // Filter Base chain pools with meaningful TVL
+    const basePools = data.data
+      .filter(p => p.chain === "Base" && p.tvlUsd > 50000 && p.apy > 0 && p.apy < 10000)
+      .sort((a, b) => b.apy - a.apy)
+      .slice(0, 20);
+
+    const opportunities = basePools.map(p => {
+      // Enhanced risk scoring
+      let riskScore = 0;
+      if (p.tvlUsd > 50000000) riskScore += 0;        // $50M+ TVL = very safe
+      else if (p.tvlUsd > 10000000) riskScore += 1;    // $10M+
+      else if (p.tvlUsd > 1000000) riskScore += 2;     // $1M+
+      else riskScore += 3;                               // <$1M
+
+      if (p.apy > 500) riskScore += 2;                  // Very high APY = suspicious
+      else if (p.apy > 100) riskScore += 1;
+
+      if (p.ilRisk === "yes") riskScore += 1;
+      if (p.stablecoin) riskScore -= 1;                 // Stablecoins are safer
+
+      const risk = riskScore <= 1 ? "LOW" : riskScore <= 3 ? "MEDIUM" : "HIGH";
+
+      return {
+        protocol: p.project,
+        pool: p.symbol,
+        apy: Math.round(p.apy * 100) / 100,
+        apyBase: Math.round((p.apyBase || 0) * 100) / 100,
+        apyReward: Math.round((p.apyReward || 0) * 100) / 100,
+        apy7d: p.apyMean7d ? Math.round(p.apyMean7d * 100) / 100 : null,
+        apy30d: p.apyMean30d ? Math.round(p.apyMean30d * 100) / 100 : null,
+        tvl: Math.round(p.tvlUsd),
+        risk,
+        riskScore,
+        stablecoin: p.stablecoin || false,
+        il7d: p.ilRisk === "no" ? "None" : "Possible",
+        rewardTokens: p.rewardTokens || [],
+        exposure: p.exposure || null,
+        poolId: p.pool,
+      };
+    });
+
+    // Summary
+    const avgApy = opportunities.length > 0
+      ? Math.round(opportunities.reduce((s, o) => s + o.apy, 0) / opportunities.length * 100) / 100
+      : 0;
+    const totalTvl = opportunities.reduce((s, o) => s + o.tvl, 0);
+    const stablePools = opportunities.filter(o => o.stablecoin);
+    const lowRiskPools = opportunities.filter(o => o.risk === "LOW");
+
+    return {
+      agent: "Yield Optimizer",
+      version: "2.0.0",
+      lastUpdate: new Date().toISOString(),
+      summary: {
+        totalOpportunities: opportunities.length,
+        avgApy,
+        totalTvlTracked: totalTvl,
+        bestApy: opportunities[0]?.apy || 0,
+        bestProtocol: opportunities[0]?.protocol || "N/A",
+        stablePoolCount: stablePools.length,
+        bestStableApy: stablePools[0]?.apy || 0,
+        lowRiskCount: lowRiskPools.length,
+        recommendation: opportunities[0]
+          ? `Top: ${opportunities[0].protocol} ${opportunities[0].pool} at ${opportunities[0].apy}% APY (${opportunities[0].risk} risk)${stablePools[0] ? ` | Safe: ${stablePools[0].protocol} ${stablePools[0].pool} at ${stablePools[0].apy}% (stablecoin)` : ""}`
+          : "No opportunities found"
+      },
+      opportunities
+    };
+  } catch (e) {
+    return { agent: "Yield Optimizer", error: e.message, lastUpdate: new Date().toISOString(), opportunities: [], summary: {} };
+  }
+}
+
+// ─── 2. Sentiment Analyzer (Multi-Source) ───────────────────
+
+async function fetchFearGreedIndex() {
+  try {
+    const res = await fetchWithTimeout("https://api.alternative.me/fng/?limit=7");
+    const data = await res.json();
+    if (data?.data?.length > 0) {
+      return {
+        current: {
+          value: parseInt(data.data[0].value),
+          label: data.data[0].value_classification,
+          timestamp: data.data[0].timestamp,
+        },
+        history: data.data.map(d => ({
+          value: parseInt(d.value),
+          label: d.value_classification,
+          date: new Date(parseInt(d.timestamp) * 1000).toISOString().split("T")[0],
+        })),
+        trend: parseInt(data.data[0].value) > parseInt(data.data[data.data.length - 1].value) ? "IMPROVING" : "DECLINING",
+      };
+    }
+    return null;
+  } catch (e) {
+    return null;
+  }
+}
+
+async function fetchMarketDataDeFiLlama() {
+  try {
+    // DeFiLlama coins endpoint — more reliable than CoinGecko free tier
+    const coins = "coingecko:bitcoin,coingecko:ethereum,coingecko:solana,coingecko:binancecoin,coingecko:ripple,coingecko:cardano,coingecko:avalanche-2,coingecko:chainlink,coingecko:polkadot,coingecko:dogecoin";
+    const [priceRes, changeRes] = await Promise.all([
+      fetchWithTimeout(`https://coins.llama.fi/prices/current/${coins}`),
+      fetchWithTimeout(`https://coins.llama.fi/percentage/${coins}?period=1d`),
+    ]);
+    const prices = await priceRes.json();
+    const changes = await changeRes.json();
+
+    const coinList = [];
+    const symbolMap = {
+      "coingecko:bitcoin": "BTC",
+      "coingecko:ethereum": "ETH",
+      "coingecko:solana": "SOL",
+      "coingecko:binancecoin": "BNB",
+      "coingecko:ripple": "XRP",
+      "coingecko:cardano": "ADA",
+      "coingecko:avalanche-2": "AVAX",
+      "coingecko:chainlink": "LINK",
+      "coingecko:polkadot": "DOT",
+      "coingecko:dogecoin": "DOGE",
+    };
+
+    for (const [key, sym] of Object.entries(symbolMap)) {
+      const p = prices.coins?.[key];
+      const ch = changes.coins?.[key];
+      if (p) {
+        coinList.push({
+          symbol: sym,
+          price: p.price,
+          change24h: ch ? Math.round(ch * 100) / 100 : 0,
+          marketCap: p.mcap || null,
+          volume24h: null, // DeFiLlama doesn't provide volume in this endpoint
+          confidence: p.confidence || 0.99,
+          source: "defillama",
+        });
+      }
+    }
+    return coinList;
+  } catch (e) {
+    return null;
+  }
+}
+
+async function fetchMarketDataCoinGecko() {
+  try {
+    const res = await fetchWithTimeout(
+      "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=10&page=1&price_change_percentage=24h,7d",
+      {}, 6000
+    );
+    const raw = await res.json();
+    if (!Array.isArray(raw)) return null; // Rate limited - returns object instead of array
+
+    return raw.map(c => ({
+      symbol: c.symbol.toUpperCase(),
+      price: c.current_price,
+      change24h: Math.round((c.price_change_percentage_24h || 0) * 100) / 100,
+      change7d: Math.round((c.price_change_percentage_7d_in_currency || 0) * 100) / 100,
+      marketCap: c.market_cap,
+      volume24h: c.total_volume,
+      source: "coingecko",
+    }));
+  } catch (e) {
+    return null;
+  }
+}
+
+async function fetchGlobalData() {
+  try {
+    const res = await fetchWithTimeout("https://api.coingecko.com/api/v3/global", {}, 6000);
+    const data = await res.json();
+    if (data?.data) {
+      return {
+        totalMarketCap: data.data.total_market_cap?.usd || 0,
+        totalVolume24h: data.data.total_volume?.usd || 0,
+        btcDominance: Math.round((data.data.market_cap_percentage?.btc || 0) * 100) / 100,
+        ethDominance: Math.round((data.data.market_cap_percentage?.eth || 0) * 100) / 100,
+        activeCryptos: data.data.active_cryptocurrencies || 0,
+        marketCapChange24h: Math.round((data.data.market_cap_change_percentage_24h_usd || 0) * 100) / 100,
+      };
+    }
+    return null;
+  } catch (e) {
+    return null;
+  }
+}
+
+async function fetchSentimentData() {
+  try {
+    // Fetch all sources in parallel
+    const [fearGreed, llamaCoins, geckoCoins, globalData] = await Promise.all([
+      fetchFearGreedIndex(),
+      fetchMarketDataDeFiLlama(),
+      fetchMarketDataCoinGecko(),
+      fetchGlobalData(),
+    ]);
+
+    // Use best available coin data (DeFiLlama primary, CoinGecko fallback)
+    const topCoins = geckoCoins || (llamaCoins || []).map(c => ({ ...c, change7d: null }));
+
+    // Build combined sentiment score
+    let sentimentScore = 50; // default neutral
+    let sentimentSources = [];
+
+    // Source 1: Fear & Greed Index (weight: 40%)
+    if (fearGreed) {
+      sentimentScore = fearGreed.current.value * 0.4;
+      sentimentSources.push({ source: "Fear & Greed Index", value: fearGreed.current.value, label: fearGreed.current.label, weight: "40%" });
+    } else {
+      sentimentScore = 50 * 0.4;
+    }
+
+    // Source 2: Price momentum (weight: 35%)
+    const coins = llamaCoins || geckoCoins || [];
+    if (coins.length > 0) {
+      const avgChange = coins.reduce((s, c) => s + (c.change24h || 0), 0) / coins.length;
+      const positiveRatio = coins.filter(c => (c.change24h || 0) > 0).length / coins.length;
+      const momentumScore = Math.max(0, Math.min(100, 50 + avgChange * 4 + (positiveRatio - 0.5) * 40));
+      sentimentScore += momentumScore * 0.35;
+      sentimentSources.push({ source: "Price Momentum", value: Math.round(momentumScore), avgChange24h: Math.round(avgChange * 100) / 100, weight: "35%" });
+    } else {
+      sentimentScore += 50 * 0.35;
+    }
+
+    // Source 3: Market breadth (weight: 25%)
+    if (globalData) {
+      const capChangeScore = Math.max(0, Math.min(100, 50 + globalData.marketCapChange24h * 5));
+      sentimentScore += capChangeScore * 0.25;
+      sentimentSources.push({ source: "Market Cap Trend", value: Math.round(capChangeScore), change24h: globalData.marketCapChange24h, weight: "25%" });
+    } else {
+      sentimentScore += 50 * 0.25;
+    }
+
+    sentimentScore = Math.round(Math.max(0, Math.min(100, sentimentScore)));
+
+    const sentimentLabel =
+      sentimentScore >= 75 ? "Extreme Greed" :
+      sentimentScore >= 60 ? "Greed" :
+      sentimentScore >= 45 ? "Neutral" :
+      sentimentScore >= 25 ? "Fear" : "Extreme Fear";
+
+    const marketDirection =
+      sentimentScore >= 65 ? "BULLISH" :
+      sentimentScore <= 35 ? "BEARISH" : "NEUTRAL";
+
+    // Build recommendation
+    let recommendation;
+    if (sentimentScore >= 75) recommendation = "Extreme greed — historically a sell signal. Consider taking profits, tighten stops, reduce exposure.";
+    else if (sentimentScore >= 60) recommendation = "Market showing greed — momentum is positive but stay cautious. Consider DCA out of risky positions.";
+    else if (sentimentScore >= 45) recommendation = "Market neutral — no strong directional signal. Good time to research and set limit orders.";
+    else if (sentimentScore >= 25) recommendation = "Fear in the market — potential buying opportunity. Consider DCA into high-conviction assets.";
+    else recommendation = "Extreme fear — historically a strong buy signal. Maximum opportunity but also maximum uncertainty.";
+
+    return {
+      agent: "Sentiment Analyzer",
+      version: "2.0.0",
+      lastUpdate: new Date().toISOString(),
+      summary: {
+        sentimentScore,
+        sentimentLabel,
+        marketDirection,
+        totalMarketCap: globalData?.totalMarketCap || 0,
+        totalVolume24h: globalData?.totalVolume24h || 0,
+        btcDominance: globalData?.btcDominance || 0,
+        ethDominance: globalData?.ethDominance || 0,
+        marketCapChange24h: globalData?.marketCapChange24h || 0,
+        recommendation,
+      },
+      fearGreed: fearGreed || { current: { value: 0, label: "Unavailable" }, history: [], trend: "N/A" },
+      sentimentSources,
+      topCoins,
+      globalMetrics: globalData || {},
+    };
+  } catch (e) {
+    return { agent: "Sentiment Analyzer", error: e.message, lastUpdate: new Date().toISOString(), topCoins: [], summary: {} };
+  }
+}
+
+// ─── 3. Whale Tracker (Alchemy + Labels + Nansen) ──────────
+
+async function fetchWhaleData(env) {
+  try {
+    const ALCHEMY_URL = env.ALCHEMY_URL || "https://base-mainnet.g.alchemy.com/v2/2rxzAb3pSRGOv26opqwLo";
+    const REALM_TOKEN = env.REALM_TOKEN || "0xBA2cA14375b2cECA4f04350Bd014B375Bc014ad2";
+    const WETH_BASE = "0x4200000000000000000000000000000000000006";
+    const NANSEN_KEY = env.NANSEN_API_KEY || null;
+
+    // Get latest block
+    const blockRes = await fetchWithTimeout(ALCHEMY_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", method: "eth_blockNumber", params: [], id: 1 })
+    });
+    const blockData = await blockRes.json();
+    const latestBlock = parseInt(blockData.result, 16);
+    const fromBlock = "0x" + Math.max(0, latestBlock - 5000).toString(16);
+
+    const transferTopic = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+
+    // Fetch REALM and WETH transfers in parallel
+    const [realmLogsRes, wethLogsRes] = await Promise.all([
+      fetchWithTimeout(ALCHEMY_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0", method: "eth_getLogs",
+          params: [{ fromBlock, toBlock: "latest", address: REALM_TOKEN, topics: [transferTopic] }],
+          id: 2
+        })
+      }),
+      fetchWithTimeout(ALCHEMY_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0", method: "eth_getLogs",
+          params: [{ fromBlock, toBlock: "latest", address: WETH_BASE, topics: [transferTopic] }],
+          id: 3
+        })
+      }),
+    ]);
+
+    const realmLogs = (await realmLogsRes.json()).result || [];
+    const wethLogs = (await wethLogsRes.json()).result || [];
+
+    // Parse REALM transfers (>10,000 REALM)
+    const REALM_WHALE = 10000n * (10n ** 18n);
+    const transfers = [];
+
+    for (const log of realmLogs) {
+      const value = BigInt(log.data);
+      if (value >= REALM_WHALE) {
+        const from = "0x" + log.topics[1].slice(26);
+        const to = "0x" + log.topics[2].slice(26);
+        const amount = Number(value / (10n ** 18n));
+        const fromLabel = labelAddress(from);
+        const toLabel = labelAddress(to);
+        transfers.push({
+          asset: "REALM",
+          chain: "Base",
+          from, to, amount,
+          fromLabel, toLabel,
+          txHash: log.transactionHash,
+          blockNumber: parseInt(log.blockNumber, 16),
+          type: from === "0x0000000000000000000000000000000000000000" ? "MINT" :
+                to === "0x000000000000000000000000000000000000dead" ? "BURN" : "TRANSFER",
+        });
+      }
+    }
+
+    // Parse WETH transfers (>1 WETH on Base)
+    const WETH_WHALE = 1n * (10n ** 18n);
+    for (const log of wethLogs) {
+      const value = BigInt(log.data);
+      if (value >= WETH_WHALE) {
+        const from = "0x" + log.topics[1].slice(26);
+        const to = "0x" + log.topics[2].slice(26);
+        const amount = Number(value * 10000n / (10n ** 18n)) / 10000; // 4 decimals
+        const fromLabel = labelAddress(from);
+        const toLabel = labelAddress(to);
+        transfers.push({
+          asset: "WETH",
+          chain: "Base",
+          from, to, amount,
+          fromLabel, toLabel,
+          txHash: log.transactionHash,
+          blockNumber: parseInt(log.blockNumber, 16),
+          type: "TRANSFER",
+        });
+      }
+    }
+
+    // ─── Nansen Smart Money Enrichment (if API key available) ───
+    let smartMoneyData = null;
+    if (NANSEN_KEY) {
+      try {
+        // Fetch Smart Money net flows for REALM token
+        const nansenRes = await fetchWithTimeout(
+          `https://api.nansen.ai/api/v1/smart-money/netflow?chain=base&token_address=${REALM_TOKEN}&time_period=24h`,
+          { headers: { "apiKey": NANSEN_KEY, "Content-Type": "application/json" } },
+          10000
+        );
+        const nansenData = await nansenRes.json();
+
+        // Also get Smart Money DEX trades
+        const dexRes = await fetchWithTimeout(
+          `https://api.nansen.ai/api/v1/smart-money/dex-trades?chain=base&token_address=${REALM_TOKEN}&time_period=24h&limit=20`,
+          { headers: { "apiKey": NANSEN_KEY, "Content-Type": "application/json" } },
+          10000
+        );
+        const dexData = await dexRes.json();
+
+        // Get Flow Intelligence for broader view
+        const flowRes = await fetchWithTimeout(
+          `https://api.nansen.ai/api/beta/tgm/flow-intelligence?chain=base&token_address=${REALM_TOKEN}`,
+          { headers: { "apiKey": NANSEN_KEY, "Content-Type": "application/json" } },
+          10000
+        );
+        const flowData = await flowRes.json();
+
+        smartMoneyData = {
+          netflow: nansenData,
+          recentDexTrades: dexData,
+          flowIntelligence: flowData,
+          source: "nansen",
+          fetchedAt: new Date().toISOString(),
+        };
+
+        // Enrich transfers with Nansen labels if available
+        if (dexData?.data) {
+          const nansenLabels = {};
+          for (const trade of (dexData.data || [])) {
+            if (trade.wallet_address && trade.wallet_label) {
+              nansenLabels[trade.wallet_address.toLowerCase()] = trade.wallet_label;
+            }
+          }
+          // Apply Nansen labels to transfers (overrides free labels)
+          for (const t of transfers) {
+            const nFrom = nansenLabels[t.from.toLowerCase()];
+            const nTo = nansenLabels[t.to.toLowerCase()];
+            if (nFrom) { t.fromLabel = `🧠 ${nFrom}`; t.fromIsSmartMoney = true; }
+            if (nTo) { t.toLabel = `🧠 ${nTo}`; t.toIsSmartMoney = true; }
+          }
+        }
+      } catch (e) {
+        smartMoneyData = { error: e.message, source: "nansen" };
+      }
+    }
+
+    // Sort all transfers by block descending (most recent first)
+    transfers.sort((a, b) => b.blockNumber - a.blockNumber);
+
+    // Summary
+    const realmTransfers = transfers.filter(t => t.asset === "REALM");
+    const wethTransfers = transfers.filter(t => t.asset === "WETH");
+    const totalVolumeRealm = realmTransfers.reduce((s, t) => s + t.amount, 0);
+    const totalVolumeWeth = wethTransfers.reduce((s, t) => s + t.amount, 0);
+    const uniqueWhales = new Set([...transfers.map(t => t.from), ...transfers.map(t => t.to)]).size;
+    const labeledCount = transfers.filter(t => t.fromLabel || t.toLabel).length;
+    const exchangeFlows = transfers.filter(t =>
+      (t.fromLabel && t.fromLabel.match(/Binance|Coinbase|Gate|Kraken|KuCoin/i)) ||
+      (t.toLabel && t.toLabel.match(/Binance|Coinbase|Gate|Kraken|KuCoin/i))
+    );
+
+    // Determine if whales are accumulating or distributing
+    const toExchange = exchangeFlows.filter(t => t.toLabel && t.toLabel.match(/Binance|Coinbase|Gate|Kraken|KuCoin/i));
+    const fromExchange = exchangeFlows.filter(t => t.fromLabel && t.fromLabel.match(/Binance|Coinbase|Gate|Kraken|KuCoin/i));
+    const flowDirection = toExchange.length > fromExchange.length ? "DISTRIBUTION" :
+                          fromExchange.length > toExchange.length ? "ACCUMULATION" : "NEUTRAL";
+
+    return {
+      agent: "Whale Tracker",
+      version: "2.0.0",
+      lastUpdate: new Date().toISOString(),
+      summary: {
+        trackedPeriod: "Last ~2.5 hours",
+        whaleTransfers: transfers.length,
+        realmTransfers: realmTransfers.length,
+        wethTransfers: wethTransfers.length,
+        totalVolumeRealm,
+        totalVolumeWeth: Math.round(totalVolumeWeth * 10000) / 10000,
+        uniqueWhales,
+        labeledAddresses: labeledCount,
+        exchangeFlows: exchangeFlows.length,
+        flowDirection,
+        trend: transfers.length > 10 ? "HIGH_ACTIVITY" : transfers.length > 3 ? "NORMAL" : "QUIET",
+        alert: transfers.length > 10
+          ? `High activity: ${transfers.length} whale transfers detected. ${flowDirection === "DISTRIBUTION" ? "Selling pressure — whales moving to exchanges." : flowDirection === "ACCUMULATION" ? "Buying signal — whales withdrawing from exchanges." : "Mixed flow — monitor closely."}`
+          : transfers.length > 0
+          ? `${transfers.length} whale transfers in the last 2.5h. ${labeledCount} from labeled addresses.`
+          : "No whale transfers (>10K REALM or >1 WETH) in the last 2.5 hours.",
+        nansenAvailable: !!NANSEN_KEY,
+      },
+      smartMoney: smartMoneyData,
+      transfers: transfers.slice(0, 30),
+    };
+  } catch (e) {
+    return { agent: "Whale Tracker", error: e.message, lastUpdate: new Date().toISOString(), transfers: [], summary: {} };
+  }
+}
+
+// ─── Router ─────────────────────────────────────────────────
+
+export default {
+  async fetch(request, env) {
+    if (request.method === "OPTIONS") {
+      return new Response(null, { headers: CORS_HEADERS });
+    }
+
+    const url = new URL(request.url);
+    const path = url.pathname;
+
+    // GET /metadata/:id
+    if (path.startsWith("/metadata/")) {
+      const id = parseInt(path.split("/")[2]);
+      if (id >= 0 && id < AGENT_METADATA.length) {
+        return new Response(JSON.stringify(AGENT_METADATA[id]), { headers: CORS_HEADERS });
+      }
+      return new Response(JSON.stringify({ error: "Agent not found" }), { status: 404, headers: CORS_HEADERS });
+    }
+
+    // GET /api/agents
+    if (path === "/api/agents") {
+      return new Response(JSON.stringify({ agents: AGENT_METADATA, total: AGENT_METADATA.length }), { headers: CORS_HEADERS });
+    }
+
+    // GET /api/agents/:id/data
+    if (path.match(/^\/api\/agents\/\d+\/data$/)) {
+      const id = parseInt(path.split("/")[3]);
+      let data;
+      switch (id) {
+        case 0: data = await fetchYieldData(); break;
+        case 1: data = await fetchSentimentData(); break;
+        case 2: data = await fetchWhaleData(env); break;
+        default:
+          return new Response(JSON.stringify({ error: "Agent not found" }), { status: 404, headers: CORS_HEADERS });
+      }
+      return new Response(JSON.stringify(data), { headers: CORS_HEADERS });
+    }
+
+    // GET /api/dashboard
+    if (path === "/api/dashboard") {
+      const [yieldData, sentiment, whales] = await Promise.all([
+        fetchYieldData(),
+        fetchSentimentData(),
+        fetchWhaleData(env),
+      ]);
+      return new Response(JSON.stringify({
+        timestamp: new Date().toISOString(),
+        version: "2.0.0",
+        agents: [
+          { id: 0, name: "Yield Optimizer", status: "active", summary: yieldData.summary },
+          { id: 1, name: "Sentiment Analyzer", status: "active", summary: sentiment.summary },
+          { id: 2, name: "Whale Tracker", status: "active", summary: whales.summary },
+        ]
+      }), { headers: CORS_HEADERS });
+    }
+
+    // GET /
+    if (path === "/") {
+      return new Response(JSON.stringify({
+        name: "RealmAgents API",
+        version: "2.0.0",
+        features: [
+          "Fear & Greed Index integration",
+          "Multi-source sentiment (DeFiLlama + CoinGecko + Alternative.me)",
+          "Enhanced risk scoring for yield opportunities",
+          "WETH whale tracking on Base",
+          "Known address labeling (exchanges, bridges)",
+          "Nansen Smart Money integration (when API key is set)",
+        ],
+        endpoints: [
+          "GET /metadata/:id - Agent metadata (ERC-721)",
+          "GET /api/agents - List all agents",
+          "GET /api/agents/:id/data - Real-time agent data",
+          "GET /api/dashboard - All agents summary",
+        ],
+        agents: AGENT_METADATA.map((a, i) => ({ id: i, name: a.name, category: a.category, version: a.version })),
+      }), { headers: CORS_HEADERS });
+    }
+
+    return new Response(JSON.stringify({ error: "Not found" }), { status: 404, headers: CORS_HEADERS });
+  }
+};

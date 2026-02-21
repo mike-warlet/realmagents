@@ -1,0 +1,50 @@
+{
+  "name": "Whale Intelligence Agent",
+  "description": "Track large REALM movements, profile wallets, analyze flow patterns, monitor liquidity.",
+  "url": "https://agents-api.warlet-invest.workers.dev/agents/whale",
+  "version": "1.0.0",
+  "defaultInputModes": [
+    "text"
+  ],
+  "defaultOutputModes": [
+    "text"
+  ],
+  "authentication": {
+    "schemes": [
+      "realm-token"
+    ],
+    "description": "Hold or stake $REALM for premium access"
+  },
+  "skills": [
+    {
+      "id": "recent_whale_txs",
+      "name": "Recent Whale Txs"
+    },
+    {
+      "id": "wallet_profile",
+      "name": "Wallet Profile"
+    },
+    {
+      "id": "flow_analysis",
+      "name": "Flow Analysis"
+    },
+    {
+      "id": "liquidity_monitor",
+      "name": "Liquidity Monitor"
+    }
+  ],
+  "capabilities": {
+    "streaming": false,
+    "pushNotifications": false,
+    "stateTransitionHistory": false
+  },
+  "provider": {
+    "organization": "RealmAgents",
+    "url": "https://realmagents.io"
+  },
+  "realmEconomy": {
+    "token": "0xBA2cA14375b2cECA4f04350Bd014B375Bc014ad2",
+    "chain": "base",
+    "chainId": 8453
+  }
+}

@@ -1,0 +1,50 @@
+{
+  "name": "Portfolio Rebalancer",
+  "description": "Analyze Base wallets, find DeFi yields, get rebalancing suggestions and portfolio risk scores.",
+  "url": "https://agents-api.warlet-invest.workers.dev/agents/rebalancer",
+  "version": "1.0.0",
+  "defaultInputModes": [
+    "text"
+  ],
+  "defaultOutputModes": [
+    "text"
+  ],
+  "authentication": {
+    "schemes": [
+      "realm-token"
+    ],
+    "description": "Hold or stake $REALM for premium access"
+  },
+  "skills": [
+    {
+      "id": "analyze_wallet",
+      "name": "Analyze Wallet"
+    },
+    {
+      "id": "get_yields",
+      "name": "Get Yields"
+    },
+    {
+      "id": "suggest_rebalance",
+      "name": "Suggest Rebalance"
+    },
+    {
+      "id": "portfolio_score",
+      "name": "Portfolio Score"
+    }
+  ],
+  "capabilities": {
+    "streaming": false,
+    "pushNotifications": false,
+    "stateTransitionHistory": false
+  },
+  "provider": {
+    "organization": "RealmAgents",
+    "url": "https://realmagents.io"
+  },
+  "realmEconomy": {
+    "token": "0xBA2cA14375b2cECA4f04350Bd014B375Bc014ad2",
+    "chain": "base",
+    "chainId": 8453
+  }
+}
