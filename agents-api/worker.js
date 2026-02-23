@@ -1,1285 +1,697 @@
-// ═══════════════════════════════════════════════════════════════════════
-// RealmAgents Worker v3.0 — ERC-8004 Compliant Multi-Agent Server
-// 4 AI Agents with A2A, MCP, x402-like $REALM economy
-// ═══════════════════════════════════════════════════════════════════════
+/**
+ * RealmAgents API Worker v2
+ * Backend for AI agents with dynamic registry + 4 new ERC-8004 agents
+ * Backwards compatible: keeps original 3 agents (Yield, Sentiment, Whale)
+ * Adds: dynamic registry read, slug-based agent routes, A2A/MCP endpoints
+ */
 
-// ─── Constants ───────────────────────────────────────────────────────
-const REALM_TOKEN = "0xBA2cA14375b2cECA4f04350Bd014B375Bc014ad2";
-const WETH_BASE = "0x4200000000000000000000000000000000000006";
-const AGENT_REGISTRY = "0x8Fa9b010D9B30EF3112060F3Afa3c7573a0f9a17";
-const REVENUE_ROUTER = "0xA9c2bb95f9041922f1D4ad50C90dc9e881b765Cc";
-const LAUNCHPAD = "0x3b5Cb24E7cf42a8a4405968c81D257Ca71B6Aa10";
-const REALM_DAO = "0x157A257228c5FebB7F332a8E492F0037f3A0526f";
-const TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
-const ERC20_BALANCE_SIG = "0x70a08231";
-const API_BASE = "https://agents-api.warlet-invest.workers.dev";
-
-// Tier thresholds (in wei, 18 decimals)
-const REALM_TIER_THRESHOLD = 100n * (10n ** 18n);   // 100 REALM
-const STAKER_TIER_THRESHOLD = 1000n * (10n ** 18n);  // 1000 REALM staked
-
-// ─── Known Wallet Labels ─────────────────────────────────────────────
-const KNOWN_WALLETS = {
-  "0x3154cf16ccdb4c6d922629664174b904d80f2c35": "Binance Hot",
-  "0xf89d7b9c864f589bbf53a82105107622b35eaa40": "Bybit",
-  "0x1ab4973a48dc892cd9971ece8e01dcc7688f8f23": "Bybit 2",
-  "0x28c6c06298d514db089934071355e5743bf21d60": "Binance 14",
-  "0x21a31ee1afc51d94c2efccaa2092ad1028285549": "Binance 15",
-  "0xd9d93951896b4ef97d251334ef2a0e39f6f6d7d7": "Aerodrome",
-  "0x420dd381b31aef6683db6b902084cb0ffece40da": "Aerodrome Router",
-  "0xcf77a3ba9a5ca399b7c97c74d54e5b1beb874e43": "Aerodrome LP",
-  "0x4200000000000000000000000000000000000006": "WETH (Base)",
-  "0x3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad": "Uniswap Router",
-  "0x2626664c2603336e57b271c5c0b26f421741e481": "Uniswap V3 Router",
-  "0x4752ba5dbc23f44d87826276bf6fd6b1c372ad24": "Uniswap V2 Router",
-  "0x0000000000000000000000000000000000000000": "Null (Burn)",
-  [REALM_TOKEN.toLowerCase()]: "REALM Token Contract",
-  [AGENT_REGISTRY.toLowerCase()]: "AgentRegistry",
-  [REVENUE_ROUTER.toLowerCase()]: "RevenueRouter",
-  [LAUNCHPAD.toLowerCase()]: "AgentLaunchpad",
-  [REALM_DAO.toLowerCase()]: "RealmDAO Treasury",
-};
-
-// ─── Agent Definitions ───────────────────────────────────────────────
-const AGENTS = {
-  swap: {
-    id: 3,
-    slug: "swap",
-    name: "REALM Swap Agent",
-    description: "Real-time REALM price data, swap quotes, technical analysis, and trading signals. Powered by DeFiLlama and on-chain Base data.",
-    category: "DEFI",
-    version: "1.0.0",
-    skills: [
-      { id: "get_realm_price", name: "Get REALM Price", description: "Current REALM price in USD and ETH", tags: ["defi", "price", "realm"] },
-      { id: "get_swap_quote", name: "Swap Quote", description: "Get quote to swap REALM ↔ WETH", tags: ["defi", "swap", "trading"] },
-      { id: "analyze_pair", name: "Analyze Pair", description: "Technical analysis of REALM/WETH pair", tags: ["analytics", "trading", "technical-analysis"] },
-      { id: "price_history", name: "Price History", description: "REALM price chart data (24h/7d/30d)", tags: ["analytics", "price", "history"] },
-    ],
-    tools: ["get_realm_price", "get_swap_quote", "analyze_pair", "price_history"],
-  },
-  rebalancer: {
-    id: 4,
-    slug: "rebalancer",
-    name: "Portfolio Rebalancer",
-    description: "Analyze any Base wallet, find the best DeFi yields, get personalized rebalancing suggestions and portfolio risk scores.",
-    category: "DEFI",
-    version: "1.0.0",
-    skills: [
-      { id: "analyze_wallet", name: "Analyze Wallet", description: "Analyze Base wallet holdings and positions", tags: ["defi", "portfolio", "analysis"] },
-      { id: "get_yields", name: "Get Yields", description: "Top DeFi yields on Base sorted by APY/risk", tags: ["defi", "yield", "farming"] },
-      { id: "suggest_rebalance", name: "Suggest Rebalance", description: "AI-powered portfolio rebalancing suggestions", tags: ["defi", "portfolio", "optimization"] },
-      { id: "portfolio_score", name: "Portfolio Score", description: "Risk/diversification score for a wallet", tags: ["analytics", "risk", "scoring"] },
-    ],
-    tools: ["analyze_wallet", "get_yields", "suggest_rebalance", "portfolio_score"],
-  },
-  governance: {
-    id: 5,
-    slug: "governance",
-    name: "DAO Governance Agent",
-    description: "Monitor RealmDAO proposals, analyze governance impact, track voting status, and get DAO treasury statistics.",
-    category: "ANALYTICS",
-    version: "1.0.0",
-    skills: [
-      { id: "get_proposals", name: "Get Proposals", description: "List active and recent RealmDAO proposals", tags: ["governance", "dao", "proposals"] },
-      { id: "analyze_proposal", name: "Analyze Proposal", description: "AI analysis of proposal impact with pros/cons", tags: ["governance", "analysis", "ai"] },
-      { id: "voting_status", name: "Voting Status", description: "Detailed voting status with quorum tracking", tags: ["governance", "voting", "status"] },
-      { id: "dao_stats", name: "DAO Stats", description: "Treasury balance, staking stats, holder count", tags: ["governance", "treasury", "statistics"] },
-    ],
-    tools: ["get_proposals", "analyze_proposal", "voting_status", "dao_stats"],
-  },
-  whale: {
-    id: 6,
-    slug: "whale",
-    name: "Whale Intelligence Agent",
-    description: "Track large REALM and WETH movements, identify known wallets, analyze flow patterns, and monitor liquidity pools.",
-    category: "ANALYTICS",
-    version: "1.0.0",
-    skills: [
-      { id: "recent_whale_txs", name: "Recent Whale Txs", description: "Latest large REALM transfers (>100 tokens)", tags: ["analytics", "whale", "transfers"] },
-      { id: "wallet_profile", name: "Wallet Profile", description: "Profile a wallet with balance, labels, and history", tags: ["analytics", "wallet", "profile"] },
-      { id: "flow_analysis", name: "Flow Analysis", description: "REALM flow analysis (exchange inflow/outflow)", tags: ["analytics", "flow", "smart-money"] },
-      { id: "liquidity_monitor", name: "Liquidity Monitor", description: "REALM/WETH pool liquidity status", tags: ["defi", "liquidity", "monitoring"] },
-    ],
-    tools: ["recent_whale_txs", "wallet_profile", "flow_analysis", "liquidity_monitor"],
-  },
-};
-
-// ─── CORS Headers ────────────────────────────────────────────────────
-const CORS = {
+const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, X-Wallet-Address",
+  "Access-Control-Allow-Headers": "Content-Type, X-Wallet",
   "Content-Type": "application/json",
 };
 
-function json(data, status = 200) {
-  return new Response(JSON.stringify(data), { status, headers: CORS });
-}
+// ─── Contract Addresses ─────────────────────────────────────
+const REALM_TOKEN = "0xBA2cA14375b2cECA4f04350Bd014B375Bc014ad2";
+const WETH = "0x4200000000000000000000000000000000000006";
+const AGENT_REGISTRY = "0x8Fa9b010D9B30EF3112060F3Afa3c7573a0f9a17";
+const REVENUE_ROUTER = "0xA9c2bb95f9041922f1D4ad50C90dc9e881b765Cc";
+const REALM_DAO = "0x157A257228c5FebB7F332a8E492F0037f3A0526f";
+const BASE_RPC = "https://mainnet.base.org";
 
-// ─── Safe Fetch ──────────────────────────────────────────────────────
-async function safeFetch(url, opts = {}, timeoutMs = 8000) {
-  try {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-    const res = await fetch(url, { ...opts, signal: ctrl.signal });
-    clearTimeout(timer);
-    if (!res.ok) return null;
-    return await res.json();
-  } catch { return null; }
-}
+// ─── ABI Selectors ──────────────────────────────────────────
+const SEL = {
+  balanceOf: "0x70a08231",
+  totalSupply: "0x18160ddd",
+  agentCount: "0xf3ce93e5",
+  getAgent: "0x2a0acc6a",
+  totalStaked: "0x817b1cd2",
+  proposalCount: "0xda35c664",
+};
 
-// ─── RPC Helper ──────────────────────────────────────────────────────
-async function rpcCall(env, method, params) {
-  const url = env.ALCHEMY_URL || "https://base-mainnet.g.alchemy.com/v2/2rxzAb3pSRGOv26opqwLo";
-  const res = await safeFetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-  });
-  return res?.result || null;
-}
-
-// ─── Tier Verification ───────────────────────────────────────────────
-async function getUserTier(wallet, agentId, env) {
-  if (!wallet || wallet === "0x" || wallet.length !== 42) return "free";
-  try {
-    // Check REALM balance
-    const paddedAddr = wallet.slice(2).toLowerCase().padStart(64, "0");
-    const balanceHex = await rpcCall(env, "eth_call", [
-      { to: REALM_TOKEN, data: ERC20_BALANCE_SIG + paddedAddr },
-      "latest",
-    ]);
-    if (!balanceHex) return "free";
-    const balance = BigInt(balanceHex);
-    if (balance >= STAKER_TIER_THRESHOLD) return "staker";
-    if (balance >= REALM_TIER_THRESHOLD) return "realm";
-    return "free";
-  } catch { return "free"; }
-}
-
-// ═══════════════════════════════════════════════════════════════════════
-// AGENT-CARD.JSON GENERATOR (A2A Discovery)
-// ═══════════════════════════════════════════════════════════════════════
-function generateAgentCard(agent) {
-  return {
-    name: agent.name,
-    description: agent.description,
-    url: `${API_BASE}/agents/${agent.slug}`,
-    version: agent.version,
-    defaultInputModes: ["text"],
-    defaultOutputModes: ["text"],
-    authentication: {
-      schemes: ["realm-token"],
-      description: "Hold $REALM tokens for premium access. Free tier available. Hold 100+ REALM for full data. Stake 1000+ REALM for advanced features.",
-    },
-    skills: agent.skills,
-    capabilities: {
-      streaming: false,
-      pushNotifications: false,
-      stateTransitionHistory: false,
-    },
-    provider: {
-      organization: "RealmAgents",
-      url: "https://realmagents.io",
-    },
-    realmEconomy: {
-      token: REALM_TOKEN,
-      chain: "base",
-      chainId: 8453,
-      tiers: {
-        free: { requirement: "None", features: "Basic data" },
-        realm: { requirement: "Hold 100+ REALM", features: "Full data + analysis" },
-        staker: { requirement: "Stake 1000+ REALM", features: "Advanced AI + execution" },
-      },
-      contracts: {
-        agentRegistry: AGENT_REGISTRY,
-        revenueRouter: REVENUE_ROUTER,
-        launchpad: LAUNCHPAD,
-      },
-    },
-  };
-}
-
-// ═══════════════════════════════════════════════════════════════════════
-// A2A PROTOCOL HANDLER (JSON-RPC 2.0)
-// ═══════════════════════════════════════════════════════════════════════
-async function handleA2A(agentSlug, request, env) {
-  const agent = AGENTS[agentSlug];
-  if (!agent) return json({ error: "Agent not found" }, 404);
-  let body;
-  try { body = await request.json(); } catch { return json({ jsonrpc: "2.0", error: { code: -32700, message: "Parse error" } }, 400); }
-
-  const { method, params, id } = body;
-  const wallet = request.headers.get("X-Wallet-Address") || params?.wallet || "";
-  const tier = await getUserTier(wallet, agent.id, env);
-
-  switch (method) {
-    case "tasks/send": {
-      const toolName = params?.tool || params?.skill || "";
-      const toolParams = params?.input || params?.params || {};
-      const result = await executeAgentTool(agentSlug, toolName, { ...toolParams, wallet }, tier, env);
-      return json({
-        jsonrpc: "2.0",
-        id,
-        result: {
-          id: `task-${Date.now()}`,
-          status: { state: "completed" },
-          output: result,
-          tier,
-          agent: agent.name,
-        },
-      });
-    }
-    case "tasks/get":
-      return json({ jsonrpc: "2.0", id, result: { status: { state: "completed" }, message: "Stateless agent — use tasks/send" } });
-    case "agent/info":
-      return json({ jsonrpc: "2.0", id, result: generateAgentCard(agent) });
-    default:
-      return json({ jsonrpc: "2.0", id, error: { code: -32601, message: `Method not found: ${method}` } }, 400);
+// ─── Original Agent Metadata (v1 compatibility) ─────────────
+const AGENT_METADATA = [
+  {
+    name: "Yield Optimizer",
+    description: "Monitors and ranks the best DeFi yield opportunities on Base L2.",
+    image: "https://realmagents.io/agents/yield-optimizer.svg",
+    category: "DEFI", capabilities: ["yield_monitoring", "risk_assessment"],
+    version: "1.0.0", chain: "base", status: "active"
+  },
+  {
+    name: "Sentiment Analyzer",
+    description: "Real-time crypto market sentiment analysis using price data and metrics.",
+    image: "https://realmagents.io/agents/sentiment-analyzer.svg",
+    category: "ANALYTICS", capabilities: ["sentiment_scoring", "market_analysis"],
+    version: "1.0.0", chain: "base", status: "active"
+  },
+  {
+    name: "Whale Tracker",
+    description: "Tracks large $REALM and ETH transfers on Base L2 in real-time.",
+    image: "https://realmagents.io/agents/whale-tracker.svg",
+    category: "ANALYTICS", capabilities: ["whale_detection", "transfer_monitoring"],
+    version: "1.0.0", chain: "base", status: "active"
   }
-}
-
-// ═══════════════════════════════════════════════════════════════════════
-// MCP PROTOCOL HANDLER
-// ═══════════════════════════════════════════════════════════════════════
-async function handleMCP(agentSlug, request, env) {
-  const agent = AGENTS[agentSlug];
-  if (!agent) return json({ error: "Agent not found" }, 404);
-  let body;
-  try { body = await request.json(); } catch { return json({ error: "Parse error" }, 400); }
-
-  const { method, params, id } = body;
-  const wallet = request.headers.get("X-Wallet-Address") || "";
-  const tier = await getUserTier(wallet, agent.id, env);
-
-  switch (method) {
-    case "tools/list":
-      return json({
-        jsonrpc: "2.0", id,
-        result: {
-          tools: agent.skills.map(s => ({
-            name: s.id,
-            description: s.description,
-            inputSchema: { type: "object", properties: getToolSchema(s.id) },
-          })),
-        },
-      });
-    case "tools/call": {
-      const toolName = params?.name || "";
-      const toolArgs = params?.arguments || {};
-      const result = await executeAgentTool(agentSlug, toolName, { ...toolArgs, wallet }, tier, env);
-      return json({ jsonrpc: "2.0", id, result: { content: [{ type: "text", text: JSON.stringify(result) }] } });
-    }
-    default:
-      return json({ jsonrpc: "2.0", id, error: { code: -32601, message: `Method not found: ${method}` } }, 400);
-  }
-}
-
-function getToolSchema(toolId) {
-  const schemas = {
-    get_realm_price: {},
-    get_swap_quote: { amount: { type: "string", description: "Amount to swap" }, direction: { type: "string", description: "buy or sell REALM" } },
-    analyze_pair: {},
-    price_history: { period: { type: "string", description: "24h, 7d, or 30d" } },
-    analyze_wallet: { address: { type: "string", description: "Base wallet address" } },
-    get_yields: { min_tvl: { type: "number", description: "Minimum TVL in USD" }, max_risk: { type: "string", description: "low, medium, high" } },
-    suggest_rebalance: { address: { type: "string", description: "Wallet to analyze" } },
-    portfolio_score: { address: { type: "string", description: "Wallet address" } },
-    get_proposals: {},
-    analyze_proposal: { proposal_id: { type: "number", description: "Proposal ID" } },
-    voting_status: { proposal_id: { type: "number", description: "Proposal ID" } },
-    dao_stats: {},
-    recent_whale_txs: { min_amount: { type: "number", description: "Min REALM amount" } },
-    wallet_profile: { address: { type: "string", description: "Wallet to profile" } },
-    flow_analysis: {},
-    liquidity_monitor: {},
-  };
-  return schemas[toolId] || {};
-}
-
-// ═══════════════════════════════════════════════════════════════════════
-// TOOL EXECUTOR (routes to correct agent tool)
-// ═══════════════════════════════════════════════════════════════════════
-async function executeAgentTool(agentSlug, toolName, params, tier, env) {
-  const toolMap = {
-    // Swap Agent
-    get_realm_price: () => toolGetRealmPrice(env),
-    get_swap_quote: () => toolGetSwapQuote(params, tier, env),
-    analyze_pair: () => toolAnalyzePair(tier, env),
-    price_history: () => toolPriceHistory(params, tier, env),
-    // Rebalancer Agent
-    analyze_wallet: () => toolAnalyzeWallet(params, tier, env),
-    get_yields: () => toolGetYields(params, tier, env),
-    suggest_rebalance: () => toolSuggestRebalance(params, tier, env),
-    portfolio_score: () => toolPortfolioScore(params, tier, env),
-    // Governance Agent
-    get_proposals: () => toolGetProposals(tier, env),
-    analyze_proposal: () => toolAnalyzeProposal(params, tier, env),
-    voting_status: () => toolVotingStatus(params, tier, env),
-    dao_stats: () => toolDaoStats(tier, env),
-    // Whale Agent
-    recent_whale_txs: () => toolRecentWhaleTxs(params, tier, env),
-    wallet_profile: () => toolWalletProfile(params, tier, env),
-    flow_analysis: () => toolFlowAnalysis(tier, env),
-    liquidity_monitor: () => toolLiquidityMonitor(tier, env),
-  };
-  const fn = toolMap[toolName];
-  if (!fn) return { error: `Unknown tool: ${toolName}`, available: Object.keys(toolMap) };
-  try { return await fn(); } catch (e) { return { error: e.message }; }
-}
-
-// ═══════════════════════════════════════════════════════════════════════
-// SWAP AGENT TOOLS
-// ═══════════════════════════════════════════════════════════════════════
-
-async function toolGetRealmPrice(env) {
-  const [llamaPrice, llamaPct] = await Promise.all([
-    safeFetch(`https://coins.llama.fi/prices/current/base:${REALM_TOKEN}`),
-    safeFetch(`https://coins.llama.fi/percentage/base:${REALM_TOKEN}`),
-  ]);
-  const key = `base:${REALM_TOKEN}`;
-  const coin = llamaPrice?.coins?.[key] || {};
-  const pct = llamaPct?.coins?.[key] || 0;
-  // Also get WETH price for ratio
-  const wethData = await safeFetch(`https://coins.llama.fi/prices/current/base:${WETH_BASE}`);
-  const wethPrice = wethData?.coins?.[`base:${WETH_BASE}`]?.price || 2500;
-  const realmPrice = coin.price || 0;
-  const realmInEth = wethPrice > 0 ? realmPrice / wethPrice : 0;
-  return {
-    price_usd: realmPrice,
-    price_eth: realmInEth,
-    symbol: coin.symbol || "REALM",
-    change_24h: pct,
-    market_cap: coin.mcap || null,
-    confidence: coin.confidence || "low",
-    weth_price_usd: wethPrice,
-    timestamp: new Date().toISOString(),
-    source: "DeFiLlama",
-  };
-}
-
-async function toolGetSwapQuote(params, tier, env) {
-  const price = await toolGetRealmPrice(env);
-  const amount = parseFloat(params.amount) || 1000;
-  const direction = (params.direction || "sell").toLowerCase();
-  let result;
-  if (direction === "sell") {
-    const realmValue = amount * price.price_usd;
-    const wethAmount = amount * price.price_eth;
-    result = {
-      direction: "sell",
-      input: { amount, token: "REALM", value_usd: realmValue },
-      output: { amount: wethAmount, token: "WETH", value_usd: realmValue },
-      rate: `1 REALM = ${price.price_eth.toFixed(10)} WETH`,
-      slippage_estimate: amount > 10000 ? "2-5% (large order)" : "0.3-1%",
-      dex: "Aerodrome (Base)",
-    };
-  } else {
-    const wethValue = amount * price.weth_price_usd;
-    const realmAmount = price.price_usd > 0 ? wethValue / price.price_usd : 0;
-    result = {
-      direction: "buy",
-      input: { amount, token: "WETH", value_usd: wethValue },
-      output: { amount: realmAmount, token: "REALM", value_usd: wethValue },
-      rate: `1 WETH = ${(price.weth_price_usd / (price.price_usd || 1)).toFixed(2)} REALM`,
-      slippage_estimate: wethValue > 5000 ? "2-5% (large order)" : "0.3-1%",
-      dex: "Aerodrome (Base)",
-    };
-  }
-  result.price = price;
-  result.tier = tier;
-  if (tier === "free") result.note = "Hold 100+ REALM for technical analysis. Stake 1000+ for trading signals.";
-  return result;
-}
-
-async function toolAnalyzePair(tier, env) {
-  if (tier === "free") return { error: "Technical analysis requires REALM tier (hold 100+ REALM)", tier, upgrade: "Hold 100+ REALM tokens to unlock" };
-  const [price, chartData] = await Promise.all([
-    toolGetRealmPrice(env),
-    safeFetch(`https://coins.llama.fi/chart/base:${REALM_TOKEN}?span=7&period=1h`),
-  ]);
-  const prices = chartData?.coins?.[`base:${REALM_TOKEN}`]?.prices || [];
-  const recentPrices = prices.slice(-24).map(p => p.price);
-  // Simple technical indicators
-  const high24h = recentPrices.length > 0 ? Math.max(...recentPrices) : price.price_usd;
-  const low24h = recentPrices.length > 0 ? Math.min(...recentPrices) : price.price_usd;
-  const avg24h = recentPrices.length > 0 ? recentPrices.reduce((a, b) => a + b, 0) / recentPrices.length : price.price_usd;
-  const momentum = price.price_usd > avg24h ? "bullish" : price.price_usd < avg24h ? "bearish" : "neutral";
-  const volatility = high24h > 0 ? ((high24h - low24h) / high24h * 100).toFixed(2) : "0";
-  // Support/resistance estimation
-  const support = low24h * 0.95;
-  const resistance = high24h * 1.05;
-  const analysis = {
-    pair: "REALM/WETH",
-    chain: "Base",
-    current_price: price.price_usd,
-    high_24h: high24h,
-    low_24h: low24h,
-    avg_24h: avg24h,
-    change_24h: price.change_24h,
-    momentum,
-    volatility_pct: parseFloat(volatility),
-    estimated_support: support,
-    estimated_resistance: resistance,
-    data_points: recentPrices.length,
-    timestamp: new Date().toISOString(),
-  };
-  // Staker-only: trading signals
-  if (tier === "staker") {
-    const rsi = recentPrices.length >= 14 ? calculateRSI(recentPrices) : 50;
-    analysis.trading_signals = {
-      rsi,
-      signal: rsi < 30 ? "OVERSOLD — potential buy" : rsi > 70 ? "OVERBOUGHT — potential sell" : "NEUTRAL — hold",
-      momentum_strength: Math.abs(price.price_usd - avg24h) / (avg24h || 1) * 100,
-      recommendation: momentum === "bullish" && rsi < 60 ? "Consider accumulating" : momentum === "bearish" && rsi > 40 ? "Consider reducing" : "Wait for clearer signal",
-    };
-  } else {
-    analysis.note = "Stake 1000+ REALM to unlock trading signals and RSI analysis";
-  }
-  return analysis;
-}
-
-function calculateRSI(prices, period = 14) {
-  if (prices.length < period + 1) return 50;
-  let gains = 0, losses = 0;
-  for (let i = prices.length - period; i < prices.length; i++) {
-    const diff = prices[i] - prices[i - 1];
-    if (diff > 0) gains += diff; else losses -= diff;
-  }
-  const avgGain = gains / period;
-  const avgLoss = losses / period;
-  if (avgLoss === 0) return 100;
-  const rs = avgGain / avgLoss;
-  return 100 - (100 / (1 + rs));
-}
-
-async function toolPriceHistory(params, tier, env) {
-  if (tier === "free") return { error: "Price history requires REALM tier (hold 100+ REALM)", tier };
-  const period = params.period || "7d";
-  const spanMap = { "24h": 1, "7d": 7, "30d": 30 };
-  const span = spanMap[period] || 7;
-  const data = await safeFetch(`https://coins.llama.fi/chart/base:${REALM_TOKEN}?span=${span}&period=${span <= 1 ? "5m" : "1h"}`);
-  const prices = data?.coins?.[`base:${REALM_TOKEN}`]?.prices || [];
-  return {
-    pair: "REALM/USD",
-    period,
-    data_points: prices.length,
-    prices: prices.slice(-100).map(p => ({ timestamp: new Date(p.timestamp * 1000).toISOString(), price: p.price })),
-    summary: {
-      start: prices[0]?.price || 0,
-      end: prices[prices.length - 1]?.price || 0,
-      high: prices.length > 0 ? Math.max(...prices.map(p => p.price)) : 0,
-      low: prices.length > 0 ? Math.min(...prices.map(p => p.price)) : 0,
-      change_pct: prices.length >= 2 ? ((prices[prices.length - 1].price - prices[0].price) / (prices[0].price || 1) * 100).toFixed(2) : "0",
-    },
-  };
-}
-
-// ═══════════════════════════════════════════════════════════════════════
-// REBALANCER AGENT TOOLS
-// ═══════════════════════════════════════════════════════════════════════
-
-const TOP_BASE_TOKENS = [
-  { symbol: "WETH", address: WETH_BASE, decimals: 18 },
-  { symbol: "USDC", address: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", decimals: 6 },
-  { symbol: "USDbC", address: "0xd9aAEc86B65D86f6A7B5B1b0c42FFA531710b6CA", decimals: 6 },
-  { symbol: "DAI", address: "0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb", decimals: 18 },
-  { symbol: "cbETH", address: "0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22", decimals: 18 },
-  { symbol: "REALM", address: REALM_TOKEN, decimals: 18 },
-  { symbol: "AERO", address: "0x940181a94A35A4569E4529A3CDfB74e38FD98631", decimals: 18 },
 ];
 
-async function toolAnalyzeWallet(params, tier, env) {
-  const address = params.address || params.wallet;
-  if (!address || address.length !== 42) return { error: "Valid Base wallet address required" };
-  if (tier === "free") {
-    // Free tier: only REALM and ETH balance
-    const [realmBal, ethBal] = await Promise.all([
-      getTokenBalance(address, REALM_TOKEN, 18, env),
-      rpcCall(env, "eth_getBalance", [address, "latest"]),
-    ]);
-    const ethBalance = ethBal ? Number(BigInt(ethBal)) / 1e18 : 0;
-    return {
-      address,
-      tier: "free",
-      balances: [
-        { symbol: "ETH", balance: ethBalance },
-        { symbol: "REALM", balance: realmBal },
-      ],
-      note: "Hold 100+ REALM to see full wallet analysis with all tokens",
-    };
-  }
-  // REALM tier+: Full analysis
-  const [ethBal, ...tokenBals] = await Promise.all([
-    rpcCall(env, "eth_getBalance", [address, "latest"]),
-    ...TOP_BASE_TOKENS.map(t => getTokenBalance(address, t.address, t.decimals, env)),
-  ]);
-  const ethBalance = ethBal ? Number(BigInt(ethBal)) / 1e18 : 0;
-  // Get prices
-  const priceKeys = TOP_BASE_TOKENS.map(t => `base:${t.address}`).join(",");
-  const priceData = await safeFetch(`https://coins.llama.fi/prices/current/base:${WETH_BASE},${priceKeys}`);
-  const prices = priceData?.coins || {};
-  const holdings = [{ symbol: "ETH", balance: ethBalance, price: prices[`base:${WETH_BASE}`]?.price || 2500, value_usd: ethBalance * (prices[`base:${WETH_BASE}`]?.price || 2500) }];
-  TOP_BASE_TOKENS.forEach((t, i) => {
-    const bal = tokenBals[i];
-    if (bal > 0) {
-      const price = prices[`base:${t.address}`]?.price || 0;
-      holdings.push({ symbol: t.symbol, balance: bal, price, value_usd: bal * price });
-    }
+// ─── New ERC-8004 Agent Definitions (slug-based) ────────────
+const AGENTS_V2 = {
+  swap: {
+    name: "REALM Swap Agent",
+    icon: "\uD83D\uDCB1",
+    color: "#8b5cf6",
+    category: "DEFI",
+    desc: "Real-time REALM price, swap quotes, and trading signals on Base.",
+    registryId: 3,
+  },
+  rebalancer: {
+    name: "Portfolio Rebalancer",
+    icon: "\uD83D\uDCCA",
+    color: "#06b6d4",
+    category: "DEFI",
+    desc: "Analyzes wallets and finds the best DeFi yields on Base.",
+    registryId: 4,
+  },
+  governance: {
+    name: "DAO Governance",
+    icon: "\uD83C\uDFDB\uFE0F",
+    color: "#f59e0b",
+    category: "DAO",
+    desc: "Monitors RealmDAO proposals, voting status, and treasury health.",
+    registryId: 5,
+  },
+  whale: {
+    name: "Whale Intelligence",
+    icon: "\uD83D\uDC0B",
+    color: "#10b981",
+    category: "ANALYTICS",
+    desc: "Tracks large REALM & WETH transfers, labels wallets, analyzes flows.",
+    registryId: 6,
+  },
+};
+
+// ─── RPC Helper ─────────────────────────────────────────────
+
+// Resolve the RPC URL from env. Supports:
+// - env.ALCHEMY_URL (full URL like https://base-mainnet.g.alchemy.com/v2/KEY)
+// - env.ALCHEMY_KEY (just the key - will construct full URL)
+// - fallback to BASE_RPC (public, may be rate-limited from CF Workers)
+function getRpcUrl(env) {
+  if (env.ALCHEMY_URL) return env.ALCHEMY_URL;
+  if (env.ALCHEMY_KEY) return `https://base-mainnet.g.alchemy.com/v2/${env.ALCHEMY_KEY}`;
+  return BASE_RPC;
+}
+
+async function rpcCall(method, params, rpcUrl) {
+  const res = await fetch(rpcUrl || BASE_RPC, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", method, params, id: 1 }),
   });
-  holdings.sort((a, b) => b.value_usd - a.value_usd);
-  const totalValue = holdings.reduce((s, h) => s + h.value_usd, 0);
-  return {
-    address,
-    tier,
-    total_value_usd: totalValue,
-    holdings: holdings.map(h => ({ ...h, allocation_pct: totalValue > 0 ? (h.value_usd / totalValue * 100).toFixed(1) : "0" })),
-    token_count: holdings.length,
-    timestamp: new Date().toISOString(),
-  };
+  const data = await res.json();
+  return data.result;
 }
 
-async function getTokenBalance(wallet, tokenAddress, decimals, env) {
-  const paddedAddr = wallet.slice(2).toLowerCase().padStart(64, "0");
-  const result = await rpcCall(env, "eth_call", [
-    { to: tokenAddress, data: ERC20_BALANCE_SIG + paddedAddr },
-    "latest",
-  ]);
-  if (!result || result === "0x") return 0;
-  return Number(BigInt(result)) / (10 ** decimals);
+async function ethCall(to, data, rpcUrl) {
+  return rpcCall("eth_call", [{ to, data }, "latest"], rpcUrl);
 }
 
-async function toolGetYields(params, tier, env) {
-  const data = await safeFetch("https://yields.llama.fi/pools");
-  if (!data?.data) return { error: "Failed to fetch yield data" };
-  const minTvl = params.min_tvl || 50000;
-  let pools = data.data
-    .filter(p => p.chain === "Base" && p.tvlUsd >= minTvl && p.apy > 0)
-    .sort((a, b) => b.apy - a.apy);
-  // Risk scoring
-  pools = pools.map(p => {
-    let risk = 0;
-    if (p.ilRisk === "yes") risk += 2;
-    if (p.tvlUsd < 100000) risk += 2;
-    else if (p.tvlUsd < 500000) risk += 1;
-    if (p.apy > 100) risk += 2;
-    else if (p.apy > 50) risk += 1;
-    if (p.exposure === "single") risk -= 1;
-    const riskLevel = risk <= 1 ? "LOW" : risk <= 3 ? "MEDIUM" : "HIGH";
-    return { ...p, riskScore: risk, riskLevel };
-  });
-  // Filter by risk if specified
-  if (params.max_risk) {
-    const riskOrder = { low: 1, medium: 3, high: 99 };
-    const maxRisk = riskOrder[params.max_risk.toLowerCase()] || 99;
-    pools = pools.filter(p => p.riskScore <= maxRisk);
-  }
-  const limit = tier === "free" ? 5 : 20;
-  const topPools = pools.slice(0, limit).map(p => ({
-    protocol: p.project,
-    pool: p.symbol,
-    apy: p.apy?.toFixed(2),
-    tvl_usd: p.tvlUsd,
-    risk: p.riskLevel,
-    il_risk: p.ilRisk || "no",
-    pool_id: p.pool,
-  }));
-  return {
-    chain: "Base",
-    total_pools: pools.length,
-    showing: topPools.length,
-    tier,
-    pools: topPools,
-    avg_apy: pools.length > 0 ? (pools.reduce((s, p) => s + p.apy, 0) / pools.length).toFixed(2) : "0",
-    total_tvl: pools.reduce((s, p) => s + p.tvlUsd, 0),
-    note: tier === "free" ? "Hold 100+ REALM to see top 20 yields" : undefined,
-  };
+function pad32(hex) {
+  return hex.replace("0x", "").padStart(64, "0");
 }
 
-async function toolSuggestRebalance(params, tier, env) {
-  if (tier !== "staker") return { error: "Rebalancing suggestions require Staker tier (stake 1000+ REALM)", tier };
-  const wallet = await toolAnalyzeWallet(params, tier, env);
-  if (wallet.error) return wallet;
-  const yields = await toolGetYields({ min_tvl: 100000, max_risk: "medium" }, tier, env);
-  const totalValue = wallet.total_value_usd;
-  // Simple allocation suggestion
-  const suggestions = [];
-  const ethAlloc = wallet.holdings.find(h => h.symbol === "ETH");
-  const stableAlloc = wallet.holdings.filter(h => ["USDC", "USDbC", "DAI"].includes(h.symbol));
-  const stableTotal = stableAlloc.reduce((s, h) => s + h.value_usd, 0);
-  const ethPct = ethAlloc ? (ethAlloc.value_usd / totalValue * 100) : 0;
-  const stablePct = totalValue > 0 ? (stableTotal / totalValue * 100) : 0;
-  if (ethPct > 60) suggestions.push({ action: "Consider diversifying — ETH allocation is " + ethPct.toFixed(0) + "%. Target: 40-50%", priority: "HIGH" });
-  if (stablePct < 10 && totalValue > 1000) suggestions.push({ action: "Low stablecoin allocation (" + stablePct.toFixed(0) + "%). Consider 15-25% in USDC for risk management", priority: "MEDIUM" });
-  if (yields.pools?.length > 0) {
-    const bestYield = yields.pools[0];
-    suggestions.push({ action: `Top yield opportunity: ${bestYield.protocol} ${bestYield.pool} at ${bestYield.apy}% APY (${bestYield.risk} risk)`, priority: "INFO" });
-  }
-  const realmHolding = wallet.holdings.find(h => h.symbol === "REALM");
-  if (!realmHolding || realmHolding.value_usd < 50) suggestions.push({ action: "Consider adding REALM to portfolio for agent access and staking rewards", priority: "LOW" });
-  return { address: params.address || params.wallet, total_value_usd: totalValue, current_allocation: wallet.holdings, suggestions, yield_opportunities: yields.pools?.slice(0, 3) || [], tier };
-}
+// ─── Original Agent Data Fetchers (v1) ──────────────────────
 
-async function toolPortfolioScore(params, tier, env) {
-  const address = params.address || params.wallet;
-  if (!address) return { error: "Wallet address required" };
-  const wallet = await toolAnalyzeWallet({ address }, tier, env);
-  if (wallet.error) return wallet;
-  const holdings = wallet.holdings || [];
-  // Diversification score (0-100)
-  const tokenCount = holdings.length;
-  const diversificationScore = Math.min(tokenCount * 15, 100);
-  // Concentration risk
-  const topHoldingPct = holdings[0] ? parseFloat(holdings[0].allocation_pct) : 100;
-  const concentrationRisk = topHoldingPct > 80 ? "HIGH" : topHoldingPct > 50 ? "MEDIUM" : "LOW";
-  // Stablecoin ratio
-  const stableValue = holdings.filter(h => ["USDC", "USDbC", "DAI"].includes(h.symbol)).reduce((s, h) => s + h.value_usd, 0);
-  const stableRatio = wallet.total_value_usd > 0 ? stableValue / wallet.total_value_usd : 0;
-  const safetyScore = stableRatio > 0.2 ? 80 : stableRatio > 0.1 ? 60 : stableRatio > 0.05 ? 40 : 20;
-  // Overall score
-  const overallScore = Math.round((diversificationScore * 0.4 + safetyScore * 0.3 + (100 - topHoldingPct) * 0.3));
-  return {
-    address,
-    total_value_usd: wallet.total_value_usd,
-    scores: {
-      overall: overallScore,
-      diversification: diversificationScore,
-      safety: safetyScore,
-      concentration_risk: concentrationRisk,
-    },
-    metrics: {
-      token_count: tokenCount,
-      top_holding_pct: topHoldingPct,
-      stablecoin_ratio_pct: (stableRatio * 100).toFixed(1),
-    },
-    rating: overallScore >= 80 ? "EXCELLENT" : overallScore >= 60 ? "GOOD" : overallScore >= 40 ? "FAIR" : "NEEDS_IMPROVEMENT",
-    tier,
-  };
-}
-
-// ═══════════════════════════════════════════════════════════════════════
-// GOVERNANCE AGENT TOOLS
-// ═══════════════════════════════════════════════════════════════════════
-
-async function toolGetProposals(tier, env) {
-  // Read from RealmDAO contract — since this is a simple DAO setup,
-  // we'll check for ProposalCreated events
-  const logs = await rpcCall(env, "eth_getLogs", [{
-    address: REALM_DAO,
-    fromBlock: "0x" + (41000000).toString(16),
-    toBlock: "latest",
-    topics: [null],  // All events
-  }]);
-  // Simulate governance data since DAO may not have active proposals yet
-  const daoBalance = await rpcCall(env, "eth_getBalance", [REALM_DAO, "latest"]);
-  const realmBalance = await getTokenBalance(REALM_DAO, REALM_TOKEN, 18, env);
-  const proposals = [];
-  if (logs && logs.length > 0) {
-    // Parse actual proposal events if they exist
-    for (let i = 0; i < Math.min(logs.length, 10); i++) {
-      proposals.push({
-        id: i + 1,
-        tx_hash: logs[i].transactionHash,
-        block: parseInt(logs[i].blockNumber, 16),
-        status: "executed",
-      });
-    }
-  }
-  return {
-    dao: "RealmDAO",
-    address: REALM_DAO,
-    proposals: proposals.length > 0 ? proposals : [{ id: 0, title: "No active proposals", status: "none", description: "The DAO currently has no active proposals." }],
-    total_proposals: proposals.length,
-    treasury: {
-      eth_balance: daoBalance ? Number(BigInt(daoBalance)) / 1e18 : 0,
-      realm_balance: realmBalance,
-    },
-    tier,
-    note: tier === "free" ? "Hold 100+ REALM for AI proposal analysis" : undefined,
-  };
-}
-
-async function toolAnalyzeProposal(params, tier, env) {
-  if (tier === "free") return { error: "Proposal analysis requires REALM tier (hold 100+ REALM)", tier };
-  const proposals = await toolGetProposals(tier, env);
-  const proposalId = params.proposal_id || 1;
-  const proposal = proposals.proposals?.find(p => p.id === proposalId);
-  if (!proposal) return { error: `Proposal ${proposalId} not found`, available: proposals.proposals?.map(p => p.id) };
-  return {
-    proposal,
-    analysis: {
-      summary: "Governance proposal on RealmDAO",
-      impact: "Affects protocol parameters and treasury allocation",
-      pros: ["Improves protocol functionality", "Community-driven decision"],
-      cons: ["Requires careful parameter tuning", "Execution risk"],
-      recommendation: "Review proposal details before voting",
-    },
-    tier,
-    note: tier !== "staker" ? "Stake 1000+ REALM for predictive analysis" : undefined,
-  };
-}
-
-async function toolVotingStatus(params, tier, env) {
-  const proposalId = params.proposal_id || 1;
-  return {
-    proposal_id: proposalId,
-    status: "No active voting — RealmDAO governance pending initialization",
-    quorum: { required: "TBD", current: 0 },
-    votes: { for: 0, against: 0, abstain: 0 },
-    deadline: null,
-    tier,
-  };
-}
-
-async function toolDaoStats(tier, env) {
-  const [daoEth, daoRealm, realmSupply, registryCount] = await Promise.all([
-    rpcCall(env, "eth_getBalance", [REALM_DAO, "latest"]),
-    getTokenBalance(REALM_DAO, REALM_TOKEN, 18, env),
-    getTokenBalance("0x0000000000000000000000000000000000000001", REALM_TOKEN, 18, env).catch(() => 100000000),
-    rpcCall(env, "eth_call", [
-      { to: AGENT_REGISTRY, data: "0x18160ddd" }, // totalSupply()
-      "latest",
-    ]),
-  ]);
-  const realmPrice = await toolGetRealmPrice(env);
-  return {
-    dao: "RealmDAO",
-    address: REALM_DAO,
-    treasury: {
-      eth: daoEth ? Number(BigInt(daoEth)) / 1e18 : 0,
-      realm: daoRealm,
-      realm_value_usd: daoRealm * (realmPrice.price_usd || 0),
-    },
-    agents: {
-      registered: registryCount ? parseInt(registryCount, 16) : 3,
-      registry: AGENT_REGISTRY,
-    },
-    contracts: {
-      registry: AGENT_REGISTRY,
-      router: REVENUE_ROUTER,
-      launchpad: LAUNCHPAD,
-      realm_token: REALM_TOKEN,
-    },
-    revenue_split: { creator: "70%", stakers: "20%", treasury: "10%" },
-    realm_price: realmPrice.price_usd,
-    tier,
-  };
-}
-
-// ═══════════════════════════════════════════════════════════════════════
-// WHALE INTELLIGENCE AGENT TOOLS
-// ═══════════════════════════════════════════════════════════════════════
-
-async function toolRecentWhaleTxs(params, tier, env) {
-  const minAmount = params.min_amount || 100;
-  const blockNum = await rpcCall(env, "eth_blockNumber", []);
-  const currentBlock = parseInt(blockNum, 16);
-  const blocksBack = 43200; // ~24h on Base
-  const fromBlock = "0x" + (currentBlock - blocksBack).toString(16);
-  // Get REALM transfers
-  const logs = await rpcCall(env, "eth_getLogs", [{
-    address: REALM_TOKEN,
-    fromBlock,
-    toBlock: "latest",
-    topics: [TRANSFER_TOPIC],
-  }]);
-  if (!logs || !Array.isArray(logs)) return { transfers: [], count: 0, period: "24h" };
-  const minWei = BigInt(minAmount) * (10n ** 18n);
-  const transfers = [];
-  for (const log of logs) {
-    if (!log.data || log.data === "0x") continue;
-    const value = BigInt(log.data);
-    if (value < minWei) continue;
-    const from = "0x" + log.topics[1]?.slice(26);
-    const to = "0x" + log.topics[2]?.slice(26);
-    const amount = Number(value) / 1e18;
-    const type = from === "0x0000000000000000000000000000000000000000" ? "MINT"
-      : to === "0x0000000000000000000000000000000000000000" ? "BURN" : "TRANSFER";
-    const entry = {
-      type,
-      amount: Math.round(amount),
-      from: from,
-      to: to,
-      from_label: KNOWN_WALLETS[from.toLowerCase()] || null,
-      to_label: KNOWN_WALLETS[to.toLowerCase()] || null,
-      tx: log.transactionHash,
-      block: parseInt(log.blockNumber, 16),
-    };
-    // Nansen enrichment (staker tier only)
-    if (tier === "staker" && env.NANSEN_API_KEY) {
-      if (!entry.from_label) entry.from_label = await getNansenLabel(from, env);
-      if (!entry.to_label) entry.to_label = await getNansenLabel(to, env);
-    }
-    transfers.push(entry);
-  }
-  transfers.sort((a, b) => b.amount - a.amount);
-  const limit = tier === "free" ? 5 : 50;
-  const totalVolume = transfers.reduce((s, t) => s + t.amount, 0);
-  return {
-    period: "24h",
-    min_threshold: minAmount,
-    count: transfers.length,
-    showing: Math.min(transfers.length, limit),
-    total_volume: totalVolume,
-    transfers: transfers.slice(0, limit),
-    tier,
-    note: tier === "free" ? "Hold 100+ REALM for full transfer list" : undefined,
-  };
-}
-
-async function getNansenLabel(address, env) {
-  if (!env.NANSEN_API_KEY) return null;
+async function fetchYieldData() {
   try {
-    const data = await safeFetch(`https://api.nansen.ai/api/v1/address/${address}/labels`, {
-      headers: { apiKey: env.NANSEN_API_KEY },
-    }, 5000);
-    if (data?.labels?.length > 0) return data.labels[0].name;
-  } catch {}
-  return null;
-}
-
-async function toolWalletProfile(params, tier, env) {
-  const address = params.address || params.wallet;
-  if (!address || address.length !== 42) return { error: "Valid wallet address required" };
-  if (tier === "free") return { error: "Wallet profiles require REALM tier (hold 100+ REALM)", tier };
-  const [realmBal, ethBal, wethBal] = await Promise.all([
-    getTokenBalance(address, REALM_TOKEN, 18, env),
-    rpcCall(env, "eth_getBalance", [address, "latest"]),
-    getTokenBalance(address, WETH_BASE, 18, env),
-  ]);
-  const ethBalance = ethBal ? Number(BigInt(ethBal)) / 1e18 : 0;
-  const label = KNOWN_WALLETS[address.toLowerCase()] || "Unknown";
-  // Check recent REALM activity
-  const blockNum = await rpcCall(env, "eth_blockNumber", []);
-  const currentBlock = parseInt(blockNum, 16);
-  const logs = await rpcCall(env, "eth_getLogs", [{
-    address: REALM_TOKEN,
-    fromBlock: "0x" + (currentBlock - 43200).toString(16),
-    toBlock: "latest",
-    topics: [TRANSFER_TOPIC, null, null],
-  }]);
-  const paddedAddr = address.slice(2).toLowerCase().padStart(64, "0");
-  const relatedTxs = (logs || []).filter(l =>
-    l.topics[1]?.slice(26).toLowerCase() === paddedAddr ||
-    l.topics[2]?.slice(26).toLowerCase() === paddedAddr
-  );
-  return {
-    address,
-    label,
-    balances: { realm: realmBal, eth: ethBalance, weth: wethBal },
-    activity_24h: { realm_transactions: relatedTxs.length },
-    classification: realmBal > 100000 ? "WHALE" : realmBal > 10000 ? "LARGE_HOLDER" : realmBal > 1000 ? "HOLDER" : "SMALL",
-    tier,
-  };
-}
-
-async function toolFlowAnalysis(tier, env) {
-  if (tier !== "staker") return { error: "Flow analysis requires Staker tier (stake 1000+ REALM)", tier };
-  const whaleTxs = await toolRecentWhaleTxs({ min_amount: 50 }, tier, env);
-  const transfers = whaleTxs.transfers || [];
-  let exchangeInflow = 0, exchangeOutflow = 0, burnVolume = 0, mintVolume = 0;
-  for (const tx of transfers) {
-    if (tx.type === "BURN") { burnVolume += tx.amount; continue; }
-    if (tx.type === "MINT") { mintVolume += tx.amount; continue; }
-    const toLabel = (tx.to_label || "").toLowerCase();
-    const fromLabel = (tx.from_label || "").toLowerCase();
-    if (toLabel.includes("binance") || toLabel.includes("bybit") || toLabel.includes("coinbase")) exchangeInflow += tx.amount;
-    if (fromLabel.includes("binance") || fromLabel.includes("bybit") || fromLabel.includes("coinbase")) exchangeOutflow += tx.amount;
-  }
-  const netFlow = exchangeOutflow - exchangeInflow;
-  return {
-    period: "24h",
-    exchange_inflow: exchangeInflow,
-    exchange_outflow: exchangeOutflow,
-    net_flow: netFlow,
-    flow_signal: netFlow > 0 ? "ACCUMULATION (outflow > inflow)" : netFlow < 0 ? "DISTRIBUTION (inflow > outflow)" : "NEUTRAL",
-    burn_volume: burnVolume,
-    mint_volume: mintVolume,
-    total_volume: whaleTxs.total_volume,
-    transfer_count: whaleTxs.count,
-    tier,
-  };
-}
-
-async function toolLiquidityMonitor(tier, env) {
-  // Check REALM liquidity on DeFiLlama
-  const [poolsData, realmPrice] = await Promise.all([
-    safeFetch("https://yields.llama.fi/pools"),
-    toolGetRealmPrice(env),
-  ]);
-  const realmPools = (poolsData?.data || []).filter(p =>
-    p.chain === "Base" && (
-      p.symbol?.toLowerCase().includes("realm") ||
-      p.underlyingTokens?.some(t => t?.toLowerCase() === REALM_TOKEN.toLowerCase())
-    )
-  );
-  // Also check REALM token balance in known DEX routers
-  const [aeroBalance, uniBalance] = await Promise.all([
-    getTokenBalance("0xd9d93951896b4ef97d251334ef2a0e39f6f6d7d7", REALM_TOKEN, 18, env),
-    getTokenBalance("0x3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad", REALM_TOKEN, 18, env),
-  ]);
-  return {
-    realm_price: realmPrice.price_usd,
-    liquidity_pools: realmPools.map(p => ({
-      protocol: p.project,
-      pool: p.symbol,
-      tvl_usd: p.tvlUsd,
-      apy: p.apy?.toFixed(2),
-    })),
-    dex_balances: {
-      aerodrome: { realm_balance: aeroBalance, value_usd: aeroBalance * (realmPrice.price_usd || 0) },
-      uniswap: { realm_balance: uniBalance, value_usd: uniBalance * (realmPrice.price_usd || 0) },
-    },
-    total_dex_liquidity_realm: aeroBalance + uniBalance,
-    total_dex_liquidity_usd: (aeroBalance + uniBalance) * (realmPrice.price_usd || 0),
-    health: (aeroBalance + uniBalance) > 10000 ? "HEALTHY" : (aeroBalance + uniBalance) > 1000 ? "LOW" : "CRITICAL",
-    tier,
-  };
-}
-
-// ═══════════════════════════════════════════════════════════════════════
-// REST API ENDPOINTS (for frontend)
-// ═══════════════════════════════════════════════════════════════════════
-
-async function handleAgentData(agentSlug, wallet, env) {
-  const agent = AGENTS[agentSlug];
-  if (!agent) return json({ error: "Agent not found" }, 404);
-  const tier = await getUserTier(wallet, agent.id, env);
-  let data;
-  switch (agentSlug) {
-    case "swap":
-      data = await toolGetRealmPrice(env);
-      if (tier !== "free") {
-        const analysis = await toolAnalyzePair(tier, env);
-        data = { ...data, analysis };
-      }
-      break;
-    case "rebalancer":
-      data = await toolGetYields({ min_tvl: 50000 }, tier, env);
-      break;
-    case "governance":
-      data = await toolDaoStats(tier, env);
-      const proposals = await toolGetProposals(tier, env);
-      data = { ...data, proposals: proposals.proposals };
-      break;
-    case "whale":
-      data = await toolRecentWhaleTxs({ min_amount: 100 }, tier, env);
-      if (tier === "staker") {
-        const flow = await toolFlowAnalysis(tier, env);
-        data = { ...data, flow };
-      }
-      break;
-  }
-  return json({
-    agent: { id: agent.id, name: agent.name, slug: agent.slug, category: agent.category },
-    tier,
-    data,
-    timestamp: new Date().toISOString(),
-  });
-}
-
-async function handleDashboard(wallet, env) {
-  const tier = wallet ? await getUserTier(wallet, 0, env) : "free";
-  const [swapData, yieldsData, govData, whaleData] = await Promise.all([
-    toolGetRealmPrice(env),
-    toolGetYields({ min_tvl: 50000 }, tier, env),
-    toolDaoStats(tier, env),
-    toolRecentWhaleTxs({ min_amount: 100 }, tier, env),
-  ]);
-  return json({
-    agents: Object.values(AGENTS).map(a => ({
-      id: a.id, name: a.name, slug: a.slug, category: a.category,
-      status: "active",
-      endpoints: {
-        card: `${API_BASE}/agents/${a.slug}/.well-known/agent-card.json`,
-        a2a: `${API_BASE}/agents/${a.slug}/a2a`,
-        mcp: `${API_BASE}/agents/${a.slug}/mcp`,
-        data: `${API_BASE}/agents/${a.slug}/api/data`,
+    const res = await fetch("https://yields.llama.fi/pools");
+    const data = await res.json();
+    const basePools = data.data
+      .filter(p => p.chain === "Base" && p.tvlUsd > 50000 && p.apy > 0)
+      .sort((a, b) => b.apy - a.apy)
+      .slice(0, 15);
+    const opportunities = basePools.map(p => ({
+      protocol: p.project, pool: p.symbol,
+      apy: Math.round(p.apy * 100) / 100,
+      tvl: Math.round(p.tvlUsd),
+      risk: p.tvlUsd > 10000000 ? "LOW" : p.tvlUsd > 1000000 ? "MEDIUM" : "HIGH",
+      rewardTokens: p.rewardTokens || [], stablecoin: p.stablecoin || false,
+      il7d: p.ilRisk === "no" ? "None" : "Possible",
+    }));
+    const avgApy = opportunities.length > 0
+      ? Math.round(opportunities.reduce((s, o) => s + o.apy, 0) / opportunities.length * 100) / 100 : 0;
+    const totalTvl = opportunities.reduce((s, o) => s + o.tvl, 0);
+    return {
+      agent: "Yield Optimizer", lastUpdate: new Date().toISOString(),
+      summary: {
+        totalOpportunities: opportunities.length, avgApy, totalTvlTracked: totalTvl,
+        bestApy: opportunities[0]?.apy || 0, bestProtocol: opportunities[0]?.protocol || "N/A",
+        recommendation: opportunities[0] ? `Top yield: ${opportunities[0].protocol} ${opportunities[0].pool} at ${opportunities[0].apy}% APY` : "No opportunities found"
       },
-    })),
-    summary: {
-      realm_price: swapData.price_usd,
-      realm_change_24h: swapData.change_24h,
-      top_yield_apy: yieldsData.pools?.[0]?.apy || "0",
-      yield_pools_count: yieldsData.total_pools,
-      dao_treasury_realm: govData.treasury?.realm || 0,
-      whale_transfers_24h: whaleData.count,
-      whale_volume_24h: whaleData.total_volume,
-    },
-    economy: {
-      token: REALM_TOKEN,
-      tiers: {
-        free: "No requirement",
-        realm: "Hold 100+ REALM",
-        staker: "Stake 1000+ REALM",
+      opportunities
+    };
+  } catch (e) {
+    return { agent: "Yield Optimizer", error: e.message, lastUpdate: new Date().toISOString(), opportunities: [] };
+  }
+}
+
+async function fetchSentimentData() {
+  try {
+    const [marketRes, globalRes] = await Promise.all([
+      fetch("https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=10&page=1&sparkline=true&price_change_percentage=1h,24h,7d"),
+      fetch("https://api.coingecko.com/api/v3/global")
+    ]);
+    const marketData = await marketRes.json();
+    const globalData = await globalRes.json();
+    const priceChanges = marketData.map(c => c.price_change_percentage_24h || 0);
+    const avgChange = priceChanges.reduce((s, v) => s + v, 0) / priceChanges.length;
+    const positiveCount = priceChanges.filter(c => c > 0).length;
+    let sentimentScore = Math.round(50 + avgChange * 3 + (positiveCount / priceChanges.length - 0.5) * 30);
+    sentimentScore = Math.max(0, Math.min(100, sentimentScore));
+    const sentimentLabel = sentimentScore >= 75 ? "Extreme Greed" : sentimentScore >= 60 ? "Greed" : sentimentScore >= 45 ? "Neutral" : sentimentScore >= 25 ? "Fear" : "Extreme Fear";
+    const topCoins = marketData.map(c => ({
+      symbol: c.symbol.toUpperCase(), name: c.name, price: c.current_price,
+      change24h: Math.round((c.price_change_percentage_24h || 0) * 100) / 100,
+      change7d: Math.round((c.price_change_percentage_7d_in_currency || 0) * 100) / 100,
+      marketCap: c.market_cap, volume24h: c.total_volume,
+    }));
+    return {
+      agent: "Sentiment Analyzer", lastUpdate: new Date().toISOString(),
+      summary: {
+        sentimentScore, sentimentLabel,
+        marketDirection: avgChange > 1 ? "BULLISH" : avgChange < -1 ? "BEARISH" : "NEUTRAL",
+        totalMarketCap: globalData.data?.total_market_cap?.usd || 0,
+        totalVolume24h: globalData.data?.total_volume?.usd || 0,
+        btcDominance: Math.round((globalData.data?.market_cap_percentage?.btc || 0) * 100) / 100,
+        recommendation: sentimentScore >= 60 ? "Market showing greed - consider taking profits" : sentimentScore <= 40 ? "Market showing fear - potential buying opportunity" : "Market neutral - monitor for breakout"
       },
-      revenue_split: { creator: "70%", stakers: "20%", treasury: "10%" },
-    },
-    user: { wallet: wallet || null, tier },
-    timestamp: new Date().toISOString(),
-  });
+      topCoins
+    };
+  } catch (e) {
+    return { agent: "Sentiment Analyzer", error: e.message, lastUpdate: new Date().toISOString(), topCoins: [] };
+  }
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-// ERC-721 METADATA (compatibility with existing AgentRegistry)
-// ═══════════════════════════════════════════════════════════════════════
-
-function handleMetadata(id) {
-  const agentByOldId = { 0: "swap", 1: "rebalancer", 2: "governance", 3: "swap", 4: "rebalancer", 5: "governance", 6: "whale" };
-  const slug = agentByOldId[id];
-  const agent = slug ? AGENTS[slug] : null;
-  if (!agent) return json({ error: "Agent not found" }, 404);
-  return json({
-    name: agent.name,
-    description: agent.description,
-    image: `https://realmagents.io/agents/${agent.slug}.svg`,
-    external_url: `https://realmagents.io/agents#${agent.slug}`,
-    attributes: [
-      { trait_type: "Category", value: agent.category },
-      { trait_type: "Version", value: agent.version },
-      { trait_type: "Chain", value: "Base" },
-      { trait_type: "ERC-8004", value: "Compliant" },
-      { trait_type: "Tools", value: agent.tools.length.toString() },
-      { trait_type: "Economy", value: "$REALM" },
-    ],
-  });
-}
-
-// ═══════════════════════════════════════════════════════════════════════
-// CHAT ENDPOINT (Workers AI + keyword fallback)
-// ═══════════════════════════════════════════════════════════════════════
-
-async function handleChat(slug, request, env) {
-  const agent = AGENTS[slug];
-  if (!agent) return json({ error: "Agent not found" }, 404);
-  let body;
-  try { body = await request.json(); } catch { return json({ error: "Invalid JSON" }, 400); }
-
-  const userMsg = body.message || body.query || "";
-  if (!userMsg.trim()) return json({ error: "Empty message" }, 400);
-
-  const wallet = request.headers.get("X-Wallet-Address") || body.wallet || "";
-  const tier = await getUserTier(wallet, agent.id, env);
-
-  // Fetch fresh data for context
-  let apiData;
-  switch (slug) {
-    case "swap": apiData = await toolGetRealmPrice(env); break;
-    case "rebalancer": apiData = await toolGetYields({ min_tvl: 50000 }, tier, env); break;
-    case "governance": apiData = await toolDaoStats(tier, env); break;
-    case "whale": apiData = await toolRecentWhaleTxs({ min_amount: 100 }, tier, env); break;
-  }
-
-  const dataCtx = JSON.stringify(apiData || {}).substring(0, 2000);
-
-  // Try Workers AI if binding exists
-  if (env.AI) {
-    try {
-      const systemPrompt = `You are ${agent.name}, an AI agent in the RealmAgents ecosystem on Base L2.
-${agent.description}
-
-Current live data: ${dataCtx}
-
-User tier: ${tier}. Rules:
-- Answer concisely in 2-3 sentences based on the live data above.
-- Always reference actual numbers from the data when possible.
-- For swap: focus on price, quotes, trading signals.
-- For rebalancer: focus on yield pools, APY, risk levels.
-- For governance: focus on DAO treasury, proposals, contracts.
-- For whale: focus on large transfers, exchange flows.
-- Tier benefits: Free (<100 REALM) = basic, Holder (100+) = full data, Staker (1000+) = advanced + signals.`;
-
-      const aiRes = await env.AI.run("@cf/meta/llama-3.1-8b-instruct", {
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userMsg },
-        ],
-        max_tokens: 300,
-      });
-      return json({
-        agent: agent.name,
-        response: aiRes.response,
-        tier,
-        powered_by: "workers-ai",
-        timestamp: new Date().toISOString(),
-      });
-    } catch (e) {
-      // Fall through to keyword matching
-    }
-  }
-
-  // Keyword fallback
-  const q = userMsg.toLowerCase();
-  let reply = "";
-
-  if (slug === "swap") {
-    const p = apiData?.price_usd || 0;
-    const w = apiData?.weth_price_usd || 0;
-    if (q.match(/price|valor|preço|cotação|quanto/)) reply = `REALM is currently $${p.toFixed(6)} USD (${(apiData?.price_eth || 0).toFixed(8)} ETH). WETH: $${w.toFixed(2)}.`;
-    else if (q.match(/swap|trocar|comprar|buy|sell|vend/)) reply = `To swap REALM, use Aerodrome on Base. Current price: $${p.toFixed(6)}. WETH: $${w.toFixed(2)}.`;
-    else if (q.match(/signal|sinal|trend|tendência/)) reply = `24h change: ${apiData?.change_24h || 0}%. ${(apiData?.change_24h || 0) > 2 ? "Bullish momentum." : (apiData?.change_24h || 0) < -2 ? "Bearish pressure." : "Neutral/sideways."} ${tier === "free" ? "Stake 1000+ REALM for advanced signals." : ""}`;
-    else reply = `I'm the REALM Swap Agent. REALM: $${p.toFixed(6)} | WETH: $${w.toFixed(2)}. Ask about price, swaps, or signals.`;
-  } else if (slug === "rebalancer") {
-    const pools = apiData?.pools || [];
-    if (q.match(/best|melhor|top|yield|apy|rend/)) reply = pools[0] ? `Top pool: ${pools[0].protocol} ${pools[0].pool} at ${pools[0].apy}% APY (TVL $${Number(pools[0].tvl_usd).toLocaleString()}, ${pools[0].risk} risk).` : "No pools available.";
-    else if (q.match(/safe|seguro|low|conserv|baixo risco/)) {
-      const safe = pools.filter(p => p.risk === "LOW");
-      reply = safe[0] ? `Safest pool: ${safe[0].protocol} ${safe[0].pool} at ${safe[0].apy}% APY.` : "No low-risk pools found.";
-    } else reply = `I track ${apiData?.total_pools || 0} Base yield pools. Showing top ${pools.length}. Ask about best yields, safe pools, or risk.`;
-  } else if (slug === "governance") {
-    const t = apiData?.treasury || {};
-    if (q.match(/treasury|tesouro|saldo|balance/)) reply = `RealmDAO treasury: ${(t.eth || 0).toFixed(4)} ETH + ${Number(t.realm || 0).toLocaleString()} REALM ($${Number(t.realm_value_usd || 0).toLocaleString()}).`;
-    else if (q.match(/proposal|proposta|vot/)) reply = "No active proposals yet. RealmDAO governance is being initialized.";
-    else if (q.match(/contract|contrato|address|endereço/)) reply = `Registry: ${AGENT_REGISTRY} | Router: ${REVENUE_ROUTER} | Launchpad: ${LAUNCHPAD} | REALM: ${REALM_TOKEN}`;
-    else reply = `RealmDAO: ${Number(t.realm || 0).toLocaleString()} REALM in treasury. ${apiData?.agents?.registered || 0} agents registered. Ask about treasury, proposals, or contracts.`;
-  } else if (slug === "whale") {
-    const tx = apiData?.transfers || [];
-    if (q.match(/whale|transfer|movimento|grande/)) reply = tx.length ? `${apiData?.count || 0} whale transfers in ${apiData?.period || "24h"}. Largest: ${tx[0]?.amount} REALM ${tx[0]?.from_label || tx[0]?.from?.slice(0,10)} → ${tx[0]?.to_label || tx[0]?.to?.slice(0,10)}.` : "No whale transfers detected recently.";
-    else if (q.match(/flow|fluxo|exchange|bolsa/)) reply = `${apiData?.count || 0} transfers tracked. ${tier !== "staker" ? "Stake 1000+ REALM for flow analysis." : "Use flow_analysis tool for detailed breakdown."}`;
-    else reply = `Whale Intelligence: ${apiData?.count || 0} large transfers in ${apiData?.period || "24h"}. Ask about whale activity, exchange flows, or transfers.`;
-  }
-
-  return json({
-    agent: agent.name,
-    response: reply || `Ask me about ${agent.skills.map(s => s.name.toLowerCase()).join(", ")}.`,
-    tier,
-    powered_by: "keyword",
-    timestamp: new Date().toISOString(),
-  });
-}
-
-// ═══════════════════════════════════════════════════════════════════════
-// MAIN ROUTER
-// ═══════════════════════════════════════════════════════════════════════
-
-export default {
-  async fetch(request, env) {
-    const url = new URL(request.url);
-    const path = url.pathname;
-    const wallet = request.headers.get("X-Wallet-Address") || url.searchParams.get("wallet") || "";
-
-    // CORS preflight
-    if (request.method === "OPTIONS") {
-      return new Response(null, { headers: CORS });
-    }
-
-    // ─── Discovery ───
-    if (path === "/" || path === "") {
-      return json({
-        name: "RealmAgents Multi-Agent Server",
-        version: "3.0.0",
-        protocol: "ERC-8004 + A2A + MCP",
-        economy: "$REALM",
-        chain: "Base (8453)",
-        agents: Object.values(AGENTS).map(a => ({
-          name: a.name,
-          slug: a.slug,
-          card: `${API_BASE}/agents/${a.slug}/.well-known/agent-card.json`,
-        })),
-        endpoints: {
-          dashboard: `${API_BASE}/api/dashboard`,
-          agents_list: `${API_BASE}/api/agents`,
-        },
-      });
-    }
-
-    // ─── Agents Discovery JSON ───
-    if (path === "/.well-known/agents.json") {
-      return json({
-        agents: Object.values(AGENTS).map(a => generateAgentCard(a)),
-      });
-    }
-
-    // ─── Agent-specific routes ───
-    const agentMatch = path.match(/^\/agents\/(\w+)(\/.*)?$/);
-    if (agentMatch) {
-      const slug = agentMatch[1];
-      const subPath = agentMatch[2] || "";
-
-      if (!AGENTS[slug]) return json({ error: `Agent '${slug}' not found`, available: Object.keys(AGENTS) }, 404);
-
-      // Agent card (A2A discovery)
-      if (subPath === "/.well-known/agent-card.json" || subPath === "/agent-card.json") {
-        return json(generateAgentCard(AGENTS[slug]));
-      }
-      // A2A endpoint
-      if (subPath === "/a2a" && request.method === "POST") {
-        return handleA2A(slug, request, env);
-      }
-      // MCP endpoint
-      if (subPath === "/mcp") {
-        if (request.method === "GET") {
-          // tools/list via GET
-          const agent = AGENTS[slug];
-          const tier = await getUserTier(wallet, agent.id, env);
-          return json({
-            tools: agent.skills.map(s => ({
-              name: s.id, description: s.description,
-              inputSchema: { type: "object", properties: getToolSchema(s.id) },
-            })),
-            agent: agent.name, description: agent.description, protocol: "MCP",
-          });
-        }
-        if (request.method === "POST") return handleMCP(slug, request, env);
-      }
-      // Chat endpoint (Workers AI + keyword fallback)
-      if (subPath === "/chat" && request.method === "POST") {
-        return handleChat(slug, request, env);
-      }
-      // REST data endpoint
-      if (subPath === "/api/data") {
-        return handleAgentData(slug, wallet, env);
-      }
-      // Agent info page
-      if (subPath === "" || subPath === "/") {
-        return json({
-          ...generateAgentCard(AGENTS[slug]),
-          endpoints: {
-            card: `${API_BASE}/agents/${slug}/.well-known/agent-card.json`,
-            a2a: `${API_BASE}/agents/${slug}/a2a`,
-            mcp: `${API_BASE}/agents/${slug}/mcp`,
-            data: `${API_BASE}/agents/${slug}/api/data`,
-          },
+async function fetchWhaleData(env) {
+  try {
+    const ALCHEMY_URL = getRpcUrl(env);
+    const blockResult = await rpcCall("eth_blockNumber", [], ALCHEMY_URL);
+    const latestBlock = parseInt(blockResult, 16);
+    const fromBlock = "0x" + (latestBlock - 5000).toString(16);
+    const transferTopic = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+    const logsResult = await rpcCall("eth_getLogs", [{
+      fromBlock, toBlock: "latest", address: env.REALM_TOKEN || REALM_TOKEN, topics: [transferTopic]
+    }], ALCHEMY_URL);
+    const logs = logsResult || [];
+    const WHALE_THRESHOLD = 10000n * (10n ** 18n);
+    const transfers = [];
+    for (const log of logs) {
+      const value = BigInt(log.data);
+      if (value >= WHALE_THRESHOLD) {
+        const from = "0x" + log.topics[1].slice(26);
+        const to = "0x" + log.topics[2].slice(26);
+        transfers.push({
+          from, to, amount: Number(value / (10n ** 18n)),
+          txHash: log.transactionHash, blockNumber: parseInt(log.blockNumber, 16),
+          type: from === "0x0000000000000000000000000000000000000000" ? "MINT" : to === "0x000000000000000000000000000000000000dead" ? "BURN" : "TRANSFER"
         });
       }
     }
+    transfers.sort((a, b) => b.amount - a.amount);
+    const totalVolume = transfers.reduce((s, t) => s + t.amount, 0);
+    const uniqueWhales = new Set([...transfers.map(t => t.from), ...transfers.map(t => t.to)]).size;
+    return {
+      agent: "Whale Tracker", lastUpdate: new Date().toISOString(),
+      summary: {
+        trackedPeriod: "Last ~2.5 hours", whaleTransfers: transfers.length,
+        totalVolumeRealm: totalVolume, uniqueWhales,
+        largestTransfer: transfers[0] ? `${transfers[0].amount.toLocaleString()} REALM` : "None",
+        trend: transfers.length > 5 ? "HIGH_ACTIVITY" : transfers.length > 0 ? "NORMAL" : "QUIET",
+        alert: transfers.length > 10 ? "High whale activity detected" : "Normal activity levels"
+      },
+      transfers: transfers.slice(0, 20)
+    };
+  } catch (e) {
+    return { agent: "Whale Tracker", error: e.message, lastUpdate: new Date().toISOString(), transfers: [] };
+  }
+}
 
-    // ─── Dashboard ───
-    if (path === "/api/dashboard") {
-      return handleDashboard(wallet, env);
-    }
+// ─── New Agent Data Fetchers (v2 - slug based) ─────────────
 
-    // ─── Agents list ───
-    if (path === "/api/agents") {
-      return json({
-        agents: Object.values(AGENTS).map(a => ({
-          id: a.id, name: a.name, slug: a.slug, category: a.category,
-          description: a.description, tools: a.tools, version: a.version,
-          endpoints: {
-            card: `${API_BASE}/agents/${a.slug}/.well-known/agent-card.json`,
-            a2a: `${API_BASE}/agents/${a.slug}/a2a`,
-            mcp: `${API_BASE}/agents/${a.slug}/mcp`,
-            data: `${API_BASE}/agents/${a.slug}/api/data`,
-          },
+async function fetchSwapData(env) {
+  try {
+    const rpcUrl = getRpcUrl(env);
+    // Get REALM price from DeFiLlama
+    const priceRes = await fetch(`https://coins.llama.fi/prices/current/base:${REALM_TOKEN}`);
+    const priceData = await priceRes.json();
+    const realmCoin = priceData.coins?.[`base:${REALM_TOKEN}`] || {};
+    const realmPrice = realmCoin.price || 0;
+
+    // Get WETH price
+    const wethRes = await fetch(`https://coins.llama.fi/prices/current/base:${WETH}`);
+    const wethData = await wethRes.json();
+    const wethPrice = wethData.coins?.[`base:${WETH}`]?.price || 0;
+
+    // Simple signal based on 24h confidence
+    const confidence = realmCoin.confidence || 0;
+    const signal = confidence > 0.95 ? "STRONG" : confidence > 0.8 ? "MODERATE" : "WEAK";
+
+    return {
+      data: {
+        realm_price_usd: realmPrice, weth_price_usd: wethPrice,
+        realm_symbol: realmCoin.symbol || "REALM",
+        realm_mcap: realmPrice * 100000000, // 100M supply
+        signal, confidence: Math.round(confidence * 100),
+        decimals: realmCoin.decimals || 18,
+        timestamp: realmCoin.timestamp || Date.now() / 1000,
+      },
+      lastUpdate: new Date().toISOString(),
+    };
+  } catch (e) {
+    return { error: e.message, data: {}, lastUpdate: new Date().toISOString() };
+  }
+}
+
+async function fetchRebalancerData(env) {
+  try {
+    const res = await fetch("https://yields.llama.fi/pools");
+    const data = await res.json();
+    const basePools = data.data
+      .filter(p => p.chain === "Base" && p.tvlUsd > 100000 && p.apy > 0)
+      .sort((a, b) => b.apy - a.apy)
+      .slice(0, 20);
+    const avgApy = basePools.length > 0
+      ? basePools.reduce((s, p) => s + p.apy, 0) / basePools.length : 0;
+    const totalTvl = basePools.reduce((s, p) => s + p.tvlUsd, 0);
+    return {
+      data: {
+        total_pools: basePools.length,
+        best_apy: basePools[0]?.apy || 0,
+        total_tvl_usd: totalTvl,
+        avg_apy: avgApy,
+        best_protocol: basePools[0]?.project || "N/A",
+        pools: basePools.map(p => ({
+          protocol: p.project, pool: p.symbol, apy: p.apy, tvl: p.tvlUsd,
+          risk: p.tvlUsd > 10e6 ? "LOW" : p.tvlUsd > 1e6 ? "MEDIUM" : "HIGH",
         })),
-        economy: { token: REALM_TOKEN, chain: "Base" },
+      },
+      lastUpdate: new Date().toISOString(),
+    };
+  } catch (e) {
+    return { error: e.message, data: {}, lastUpdate: new Date().toISOString() };
+  }
+}
+
+async function fetchGovernanceData(env) {
+  try {
+    const rpcUrl = getRpcUrl(env);
+    // Read DAO treasury (REALM balanceOf DAO)
+    const treasuryHex = await ethCall(REALM_TOKEN, SEL.balanceOf + pad32(REALM_DAO), rpcUrl);
+    const treasury = Number(BigInt(treasuryHex || "0x0") / (10n ** 18n));
+
+    // Read total supply
+    const supplyHex = await ethCall(REALM_TOKEN, SEL.totalSupply, rpcUrl);
+    const totalSupply = Number(BigInt(supplyHex || "0x0") / (10n ** 18n));
+
+    // Read proposal count
+    const countHex = await ethCall(REALM_DAO, SEL.proposalCount, rpcUrl);
+    const proposalCount = Number(BigInt(countHex || "0x0"));
+
+    // Read total staked
+    const stakedHex = await ethCall(REALM_DAO, SEL.totalStaked, rpcUrl);
+    const totalStaked = Number(BigInt(stakedHex || "0x0") / (10n ** 18n));
+
+    return {
+      data: {
+        active_proposals: 0, // Would need to iterate proposals to check active
+        total_proposals: proposalCount,
+        treasury_realm: treasury,
+        treasury_eth: 0,
+        realm_total_supply: totalSupply,
+        total_staked: totalStaked,
+        holder_count: "-",
+      },
+      lastUpdate: new Date().toISOString(),
+    };
+  } catch (e) {
+    return { error: e.message, data: {}, lastUpdate: new Date().toISOString() };
+  }
+}
+
+async function fetchWhaleV2Data(env) {
+  try {
+    const rpcUrl = getRpcUrl(env);
+    const blockResult = await rpcCall("eth_blockNumber", [], rpcUrl);
+    const latestBlock = parseInt(blockResult, 16);
+    const fromBlock = "0x" + (latestBlock - 5000).toString(16);
+    const transferTopic = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+    const logsResult = await rpcCall("eth_getLogs", [{
+      fromBlock, toBlock: "latest", address: REALM_TOKEN, topics: [transferTopic]
+    }], rpcUrl);
+    const logs = logsResult || [];
+    const THRESHOLD = 100n * (10n ** 18n); // 100 REALM for v2
+    const transfers = [];
+    for (const log of logs) {
+      const value = BigInt(log.data);
+      if (value >= THRESHOLD) {
+        const from = "0x" + log.topics[1].slice(26);
+        const to = "0x" + log.topics[2].slice(26);
+        transfers.push({
+          from, to, amount: Number(value / (10n ** 18n)),
+          txHash: log.transactionHash, blockNumber: parseInt(log.blockNumber, 16),
+          type: from === "0x0000000000000000000000000000000000000000" ? "MINT" : to === "0x000000000000000000000000000000000000dead" ? "BURN" : "TRANSFER"
+        });
+      }
+    }
+    transfers.sort((a, b) => b.amount - a.amount);
+    const totalVolume = transfers.reduce((s, t) => s + t.amount, 0);
+    const uniqueWallets = new Set([...transfers.map(t => t.from), ...transfers.map(t => t.to)]).size;
+    return {
+      data: {
+        total_transfers: transfers.length,
+        total_volume: totalVolume,
+        unique_wallets: uniqueWallets,
+        activity_level: transfers.length > 10 ? "HIGH" : transfers.length > 3 ? "MODERATE" : "QUIET",
+        transfers: transfers.slice(0, 20),
+      },
+      lastUpdate: new Date().toISOString(),
+    };
+  } catch (e) {
+    return { error: e.message, data: {}, lastUpdate: new Date().toISOString() };
+  }
+}
+
+// ─── Agent Card Generator ───────────────────────────────────
+
+function agentCard(slug, agent, baseUrl) {
+  return {
+    name: agent.name,
+    description: agent.desc,
+    url: `${baseUrl}/agents/${slug}`,
+    version: "1.0.0",
+    defaultInputModes: ["text"],
+    defaultOutputModes: ["text"],
+    capabilities: { streaming: false, pushNotifications: false },
+    authentication: {
+      schemes: ["realm-token"],
+      description: "Hold or stake $REALM for premium features"
+    },
+    skills: [{
+      id: `${slug}_data`,
+      name: `Get ${agent.name} Data`,
+      description: `Fetch live data from the ${agent.name}`,
+    }],
+    provider: {
+      organization: "RealmAgents",
+      url: "https://realmagents.io"
+    },
+  };
+}
+
+// ─── MCP Handler ────────────────────────────────────────────
+
+function handleMCP(slug, agent) {
+  const toolName = `get_${slug}_data`;
+  return {
+    tools: [{
+      name: toolName,
+      description: `Get real-time data from ${agent.name}`,
+      inputSchema: { type: "object", properties: {} },
+    }],
+  };
+}
+
+// ─── Dynamic Registry Routes ────────────────────────────────
+
+async function fetchRegistryAgents(env) {
+  try {
+    const rpcUrl = getRpcUrl(env);
+    const countHex = await ethCall(AGENT_REGISTRY, SEL.agentCount, rpcUrl);
+    const count = Number(BigInt(countHex || "0x0"));
+    const agents = [];
+
+    for (let i = 0; i < count && i < 50; i++) {
+      try {
+        const data = SEL.getAgent + pad32("0x" + i.toString(16));
+        const result = await ethCall(AGENT_REGISTRY, data, rpcUrl);
+        if (result && result !== "0x") {
+          agents.push({ id: i, raw: result });
+        }
+      } catch (e) { /* skip */ }
+    }
+
+    return { total: count, agents };
+  } catch (e) {
+    return { error: e.message, total: 0, agents: [] };
+  }
+}
+
+// ─── Chat Handler (Workers AI) ──────────────────────────────
+
+async function handleChat(slug, agent, message, env) {
+  let liveData = {};
+  try {
+    switch (slug) {
+      case "swap": liveData = await fetchSwapData(env); break;
+      case "rebalancer": liveData = await fetchRebalancerData(env); break;
+      case "governance": liveData = await fetchGovernanceData(env); break;
+      case "whale": liveData = await fetchWhaleV2Data(env); break;
+    }
+  } catch (e) { /* use empty data */ }
+
+  const dataStr = JSON.stringify(liveData.data || {}, null, 2);
+
+  const systemPrompt = `You are ${agent.name}, an AI agent on the RealmAgents platform (Base L2 blockchain).
+${agent.desc}
+
+You are part of the MegaRealms/RealmDAO ecosystem. Key facts:
+- $REALM token: ${REALM_TOKEN}
+- Agent Registry: ${AGENT_REGISTRY} (ERC-8004 / ERC-721)
+- Revenue Router: ${REVENUE_ROUTER} (70% creators, 20% DAO, 10% treasury)
+- RealmDAO: ${REALM_DAO}
+- Network: Base L2 (chain ID 8453)
+- Total Supply: 100,000,000 REALM
+
+Your current live data:
+${dataStr}
+
+Rules:
+- Answer concisely and helpfully based on your live data
+- If asked about something outside your data, say you specialize in your domain
+- Respond in the same language the user writes in (Portuguese, English, etc.)
+- Include relevant numbers from your live data when possible
+- Be professional but friendly
+- Never invent data - only use what is in your live data above`;
+
+  try {
+    if (env.AI) {
+      const aiResult = await env.AI.run("@cf/meta/llama-3.1-8b-instruct", {
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: message },
+        ],
+        max_tokens: 500,
       });
+      return {
+        response: aiResult.response || "I couldn't generate a response.",
+        powered_by: "workers-ai",
+        model: "llama-3.1-8b",
+        tier: "free",
+        agent: agent.name,
+      };
+    }
+    throw new Error("AI binding not available");
+  } catch (e) {
+    const d = liveData.data || {};
+    const ql = message.toLowerCase();
+    let response = "";
+    if (slug === "swap") {
+      const p = d.realm_price_usd || 0, w = d.weth_price_usd || 0;
+      if (ql.match(/pre[cç]o|price|valor|quanto/)) response = "REALM: $" + p.toFixed(6) + " USD | WETH: $" + w.toFixed(2) + " | Signal: " + (d.signal||"N/A") + " (" + (d.confidence||0) + "%)";
+      else if (ql.match(/swap|trocar|converter|trade/)) response = w>0&&p>0 ? "1 WETH = " + Math.round(w/p).toLocaleString() + " REALM. Swap on Aerodrome (Base)." : "Price data unavailable.";
+      else response = "REALM: $" + p.toFixed(6) + " | WETH: $" + w.toFixed(2) + " | Signal: " + (d.signal||"N/A") + ". Ask about: price, swap, signals.";
+    } else if (slug === "rebalancer") {
+      const pools = d.pools || [];
+      if (ql.match(/best|melhor|top|yield|apy/)) response = pools[0] ? "Top: " + pools[0].protocol + " " + pools[0].pool + " at " + pools[0].apy.toFixed(1) + "% APY (" + pools[0].risk + ")" : "No pools.";
+      else response = "Tracking " + (d.total_pools||0) + " pools. Best: " + (d.best_apy||0).toFixed(1) + "% on " + (d.best_protocol||"N/A") + ".";
+    } else if (slug === "governance") {
+      if (ql.match(/treasury|tesour|saldo/)) response = "Treasury: " + (d.treasury_realm||0).toLocaleString() + " REALM. Supply: " + (d.realm_total_supply||0).toLocaleString() + " REALM.";
+      else response = "RealmDAO: " + (d.total_proposals||0) + " proposals. Treasury: " + (d.treasury_realm||0).toLocaleString() + " REALM.";
+    } else if (slug === "whale") {
+      const tx = d.transfers || [];
+      response = (d.total_transfers||0) + " whale txs. Volume: " + (d.total_volume||0).toLocaleString() + " REALM. Activity: " + (d.activity_level||"QUIET") + ".";
+    }
+    return { response: response || "Ask me about " + agent.desc, powered_by: "keyword-fallback", tier: "free", agent: agent.name };
+  }
+}
+
+// ─── Router ─────────────────────────────────────────────────
+
+export default {
+  async fetch(request, env) {
+    if (request.method === "OPTIONS") {
+      return new Response(null, { headers: CORS_HEADERS });
     }
 
-    // ─── Individual agent data (legacy) ───
-    const dataMatch = path.match(/^\/api\/agents\/(\d+)\/data$/);
+    const url = new URL(request.url);
+    const path = url.pathname;
+    const baseUrl = url.origin;
+
+    // ── v2 Agent Routes: /agents/:slug/... ──
+
+    // Agent card discovery
+    const cardMatch = path.match(/^\/agents\/(\w+)\/.well-known\/agent-card\.json$/);
+    if (cardMatch) {
+      const slug = cardMatch[1];
+      const agent = AGENTS_V2[slug];
+      if (!agent) return new Response(JSON.stringify({ error: "Agent not found" }), { status: 404, headers: CORS_HEADERS });
+      return new Response(JSON.stringify(agentCard(slug, agent, baseUrl)), { headers: CORS_HEADERS });
+    }
+
+    // Agent MCP endpoint
+    const mcpMatch = path.match(/^\/agents\/(\w+)\/mcp$/);
+    if (mcpMatch) {
+      const slug = mcpMatch[1];
+      const agent = AGENTS_V2[slug];
+      if (!agent) return new Response(JSON.stringify({ error: "Agent not found" }), { status: 404, headers: CORS_HEADERS });
+      return new Response(JSON.stringify(handleMCP(slug, agent)), { headers: CORS_HEADERS });
+    }
+
+    // Agent data endpoint
+    const dataMatch = path.match(/^\/agents\/(\w+)\/api\/data$/);
     if (dataMatch) {
-      const id = parseInt(dataMatch[1]);
-      const slugMap = { 0: "swap", 1: "rebalancer", 2: "governance", 3: "swap", 4: "rebalancer", 5: "governance", 6: "whale" };
-      const slug = slugMap[id];
-      if (slug) return handleAgentData(slug, wallet, env);
+      const slug = dataMatch[1];
+      if (!AGENTS_V2[slug]) return new Response(JSON.stringify({ error: "Agent not found" }), { status: 404, headers: CORS_HEADERS });
+
+      let data;
+      switch (slug) {
+        case "swap": data = await fetchSwapData(env); break;
+        case "rebalancer": data = await fetchRebalancerData(env); break;
+        case "governance": data = await fetchGovernanceData(env); break;
+        case "whale": data = await fetchWhaleV2Data(env); break;
+        default: data = { error: "Unknown agent" };
+      }
+      return new Response(JSON.stringify(data), { headers: CORS_HEADERS });
     }
 
-    // ─── ERC-721 Metadata ───
-    const metaMatch = path.match(/^\/metadata\/(\d+)$/);
-    if (metaMatch) return handleMetadata(parseInt(metaMatch[1]));
+    // Agent Chat endpoint (Workers AI)
+    const chatMatch = path.match(/^\/agents\/(\w+)\/chat$/);
+    if (chatMatch && request.method === "POST") {
+      const slug = chatMatch[1];
+      const agent = AGENTS_V2[slug];
+      if (!agent) return new Response(JSON.stringify({ error: "Agent not found" }), { status: 404, headers: CORS_HEADERS });
+      try {
+        const body = await request.json();
+        const message = body.message || body.query || "";
+        if (!message) return new Response(JSON.stringify({ error: "No message provided" }), { status: 400, headers: CORS_HEADERS });
+        const result = await handleChat(slug, agent, message, env);
+        return new Response(JSON.stringify(result), { headers: CORS_HEADERS });
+      } catch (e) {
+        return new Response(JSON.stringify({ error: e.message, response: "Chat error: " + e.message, powered_by: "error" }), { status: 500, headers: CORS_HEADERS });
+      }
+    }
 
-    // ─── 404 ───
-    return json({ error: "Not found", routes: ["/", "/.well-known/agents.json", "/agents/{slug}", "/api/dashboard", "/api/agents"] }, 404);
-  },
+    // Agent A2A endpoint (simplified)
+    const a2aMatch = path.match(/^\/agents\/(\w+)\/a2a$/);
+    if (a2aMatch) {
+      const slug = a2aMatch[1];
+      const agent = AGENTS_V2[slug];
+      if (!agent) return new Response(JSON.stringify({ error: "Agent not found" }), { status: 404, headers: CORS_HEADERS });
+      return new Response(JSON.stringify({
+        jsonrpc: "2.0",
+        result: { status: "ready", agent: agent.name, capabilities: ["tasks/send"] },
+        id: 1
+      }), { headers: CORS_HEADERS });
+    }
+
+    // ── Discovery: /.well-known/agents.json ──
+    if (path === "/.well-known/agents.json") {
+      const agents = Object.entries(AGENTS_V2).map(([slug, a]) => ({
+        name: a.name, slug, category: a.category,
+        url: `${baseUrl}/agents/${slug}/.well-known/agent-card.json`,
+      }));
+      return new Response(JSON.stringify({ agents }), { headers: CORS_HEADERS });
+    }
+
+    // ── Dynamic Registry: /api/registry/agents ──
+    if (path === "/api/registry/agents") {
+      const data = await fetchRegistryAgents(env);
+      return new Response(JSON.stringify(data), { headers: CORS_HEADERS });
+    }
+
+    // ── v1 Routes (backwards compatible) ──
+
+    // GET /metadata/:id
+    if (path.startsWith("/metadata/")) {
+      const id = parseInt(path.split("/")[2]);
+      if (id >= 0 && id < AGENT_METADATA.length) {
+        return new Response(JSON.stringify(AGENT_METADATA[id]), { headers: CORS_HEADERS });
+      }
+      return new Response(JSON.stringify({ error: "Agent not found" }), { status: 404, headers: CORS_HEADERS });
+    }
+
+    // GET /api/agents
+    if (path === "/api/agents") {
+      return new Response(JSON.stringify({
+        agents: AGENT_METADATA,
+        total: AGENT_METADATA.length,
+        v2_agents: Object.entries(AGENTS_V2).map(([slug, a]) => ({ slug, ...a })),
+      }), { headers: CORS_HEADERS });
+    }
+
+    // GET /api/agents/:id/data
+    if (path.match(/^\/api\/agents\/\d+\/data$/)) {
+      const id = parseInt(path.split("/")[3]);
+      let data;
+      switch (id) {
+        case 0: data = await fetchYieldData(); break;
+        case 1: data = await fetchSentimentData(); break;
+        case 2: data = await fetchWhaleData(env); break;
+        default: return new Response(JSON.stringify({ error: "Agent not found" }), { status: 404, headers: CORS_HEADERS });
+      }
+      return new Response(JSON.stringify(data), { headers: CORS_HEADERS });
+    }
+
+    // GET /api/dashboard
+    if (path === "/api/dashboard") {
+      const [yield_data, sentiment, whales] = await Promise.all([
+        fetchYieldData(), fetchSentimentData(), fetchWhaleData(env)
+      ]);
+      return new Response(JSON.stringify({
+        timestamp: new Date().toISOString(),
+        agents: [
+          { id: 0, name: "Yield Optimizer", status: "active", summary: yield_data.summary },
+          { id: 1, name: "Sentiment Analyzer", status: "active", summary: sentiment.summary },
+          { id: 2, name: "Whale Tracker", status: "active", summary: whales.summary }
+        ],
+        v2_agents: Object.keys(AGENTS_V2),
+      }), { headers: CORS_HEADERS });
+    }
+
+    // GET /
+    if (path === "/") {
+      return new Response(JSON.stringify({
+        name: "RealmAgents API",
+        version: "2.0.0",
+        endpoints: [
+          "GET / - API info",
+          "GET /.well-known/agents.json - Agent discovery",
+          "GET /agents/:slug/.well-known/agent-card.json - Agent card",
+          "GET /agents/:slug/api/data - Agent live data",
+          "GET /agents/:slug/mcp - MCP tools",
+          "GET /agents/:slug/a2a - A2A endpoint",
+          "GET /api/registry/agents - On-chain registry",
+          "GET /metadata/:id - v1 metadata",
+          "GET /api/agents - v1 agent list",
+          "GET /api/agents/:id/data - v1 agent data",
+          "GET /api/dashboard - v1 dashboard",
+        ],
+        v2_agents: Object.entries(AGENTS_V2).map(([slug, a]) => ({ slug, name: a.name, category: a.category })),
+        v1_agents: AGENT_METADATA.map((a, i) => ({ id: i, name: a.name, category: a.category })),
+      }), { headers: CORS_HEADERS });
+    }
+
+    return new Response(JSON.stringify({ error: "Not found" }), { status: 404, headers: CORS_HEADERS });
+  }
 };
