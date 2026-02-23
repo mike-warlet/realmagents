@@ -1,8 +1,7 @@
 require("@nomicfoundation/hardhat-toolbox");
 
-// Carrega .env se existir
 const fs = require('fs');
-let PRIVATE_KEY = "0x0000000000000000000000000000000000000000000000000000000000000001"; // placeholder
+let PRIVATE_KEY = "0x0000000000000000000000000000000000000000000000000000000000000001";
 let ALCHEMY_KEY = "";
 
 if (fs.existsSync('.env')) {
@@ -14,40 +13,25 @@ if (fs.existsSync('.env')) {
   });
 }
 
-/** @type import('hardhat/config').HardhatUserConfig */
 module.exports = {
   solidity: {
     version: "0.8.24",
     settings: {
-      optimizer: {
-        enabled: true,
-        runs: 200
-      },
+      optimizer: { enabled: true, runs: 200 },
       viaIR: true
     }
   },
   networks: {
-    hardhat: {
-      chainId: 8453, // Base chain ID para testes locais
-    },
+    hardhat: { chainId: 8453 },
     base: {
       url: `https://base-mainnet.g.alchemy.com/v2/${ALCHEMY_KEY}`,
       accounts: [PRIVATE_KEY],
       chainId: 8453,
       gasPrice: "auto"
-    },
-    baseSepolia: {
-      url: `https://base-sepolia.g.alchemy.com/v2/${ALCHEMY_KEY}`,
-      accounts: [PRIVATE_KEY],
-      chainId: 84532,
-      gasPrice: "auto"
     }
   },
   etherscan: {
-    apiKey: {
-      base: process.env.BASESCAN_API_KEY || "",
-      baseSepolia: process.env.BASESCAN_API_KEY || ""
-    },
+    apiKey: process.env.BASESCAN_API_KEY || "",
     customChains: [
       {
         network: "base",
