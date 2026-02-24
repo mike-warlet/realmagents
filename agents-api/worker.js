@@ -89,6 +89,14 @@ const AGENTS_V2 = {
     desc: "Tracks large REALM & WETH transfers, labels wallets, analyzes flows.",
     registryId: 6,
   },
+  treasury: {
+    name: "Treasury Manager",
+    icon: "\uD83C\uDFE6",
+    color: "#eab308",
+    category: "GOVERNANCE",
+    desc: "AI-powered treasury analytics, risk assessment, and governance advisor for RealmDAO.",
+    registryId: 4,
+  },
 };
 
 // ─── RPC Helper ─────────────────────────────────────────────
@@ -339,6 +347,44 @@ async function fetchGovernanceData(env) {
   }
 }
 
+async function fetchTreasuryProxyData(env) {
+  try {
+    const rpcUrl = getRpcUrl(env);
+    const USDC = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
+    const [tRealm, tWeth, tUsdc, supply, staked, pCount] = await Promise.all([
+      ethCall(REALM_TOKEN, SEL.balanceOf + pad32(REALM_DAO), rpcUrl),
+      ethCall(WETH, SEL.balanceOf + pad32(REALM_DAO), rpcUrl),
+      ethCall(USDC, SEL.balanceOf + pad32(REALM_DAO), rpcUrl),
+      ethCall(REALM_TOKEN, SEL.totalSupply, rpcUrl),
+      ethCall(REALM_DAO, SEL.totalStaked, rpcUrl),
+      ethCall(REALM_DAO, SEL.proposalCount, rpcUrl),
+    ]);
+    const toBN = (h, d=18) => { if(!h||h==="0x") return 0; const r=BigInt(h),dv=BigInt(10)**BigInt(d),w=r/dv,f=(r%dv).toString().padStart(d,"0").slice(0,4); return parseFloat(w+"."+f); };
+    const toN = (h) => (!h||h==="0x") ? 0 : parseInt(h,16);
+    const realm = toBN(tRealm,18), weth = toBN(tWeth,18), usdc = toBN(tUsdc,6);
+    const sup = toBN(supply,18), stk = toBN(staked,18), props = toN(pCount);
+    const tPct = sup > 0 ? ((realm/sup)*100).toFixed(2) : 0;
+    const sPct = sup > 0 ? ((stk/sup)*100).toFixed(2) : 0;
+    let riskLvl = "LOW", riskScore = 0, factors = [];
+    if (realm > sup*0.1) { riskScore+=2; factors.push("Treasury >10% of supply"); }
+    if (weth < 0.01 && usdc < 100) { riskScore+=3; factors.push("Low diversification"); }
+    if (stk > sup*0.8) { riskScore+=1; factors.push("High staking ratio"); }
+    if (factors.length===0) factors.push("No significant risks");
+    riskLvl = riskScore>=5?"HIGH":riskScore>=3?"MEDIUM":"LOW";
+    return {
+      data: {
+        treasury_realm: Math.round(realm), treasury_weth: parseFloat(weth.toFixed(6)),
+        treasury_usdc: parseFloat(usdc.toFixed(2)), risk_level: riskLvl, risk_score: riskScore,
+        total_proposals: props, total_staked: Math.round(stk), staked_pct: parseFloat(sPct),
+        recommendation: weth<0.1 ? "Diversify treasury into WETH/USDC" : "Allocation reasonable",
+      },
+      lastUpdate: new Date().toISOString(),
+    };
+  } catch (e) {
+    return { error: e.message, data: {}, lastUpdate: new Date().toISOString() };
+  }
+}
+
 async function fetchWhaleV2Data(env) {
   try {
     const rpcUrl = getRpcUrl(env);
@@ -457,6 +503,7 @@ async function handleChat(slug, agent, message, env) {
       case "rebalancer": liveData = await fetchRebalancerData(env); break;
       case "governance": liveData = await fetchGovernanceData(env); break;
       case "whale": liveData = await fetchWhaleV2Data(env); break;
+      case "treasury": liveData = await fetchTreasuryProxyData(env); break;
     }
   } catch (e) { /* use empty data */ }
 
@@ -570,6 +617,7 @@ export default {
         case "rebalancer": data = await fetchRebalancerData(env); break;
         case "governance": data = await fetchGovernanceData(env); break;
         case "whale": data = await fetchWhaleV2Data(env); break;
+        case "treasury": data = await fetchTreasuryProxyData(env); break;
         default: data = { error: "Unknown agent" };
       }
       return new Response(JSON.stringify(data), { headers: CORS_HEADERS });

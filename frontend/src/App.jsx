@@ -153,7 +153,7 @@ function Home({ setSection, onConnect }) {
   );
 }
 
-// ─── New Agents Data (v2 - 4 agents with chat) ─────
+// ─── New Agents Data (v2 - 5 agents with chat) ─────
 const AGENTS_V2 = [
   {
     slug: "swap", name: "REALM Swap Agent", icon: "\uD83D\uDCB1", color: "#8b5cf6", cat: "DEFI",
@@ -230,6 +230,25 @@ const AGENTS_V2 = [
       return "Whale Intelligence: " + (data.total_transfers || 0) + " transfers | " + (data.total_volume || 0).toLocaleString() + " REALM volume | Activity: " + (data.activity_level || "QUIET") + "\nAsk about: whales, transfers, or flows.";
     },
     suggestions: ["Whale activity?", "Exchange flows?", "Recent transfers?", "Market flow?"],
+  },
+  {
+    slug: "treasury", name: "Treasury Manager", icon: "🏦", color: "#eab308", cat: "GOVERNANCE",
+    desc: "AI-powered treasury analytics, risk assessment & governance advisor",
+    greeting: "Hi! I'm the Treasury Manager Agent 🏦\n\nI can help you with:\n• DAO treasury balance & analytics\n• Risk assessment & scoring\n• Governance proposal analysis\n\nPowered by Workers AI + on-chain data.",
+    stats: (d) => [
+      { l: "Treasury", v: d?.data?.treasury_realm != null ? Number(d.data.treasury_realm).toLocaleString() + " REALM" : "0" },
+      { l: "Risk Level", v: d?.data?.risk_level || "N/A" },
+      { l: "Proposals", v: d?.data?.total_proposals != null ? String(d.data.total_proposals) : "0" },
+      { l: "Staked", v: d?.data?.total_staked != null ? Number(d.data.total_staked).toLocaleString() + " REALM" : "0" },
+    ],
+    fallback: (q, d) => {
+      const data = d?.data || {};
+      const ql = q.toLowerCase();
+      if (ql.match(/treasury|tesour|saldo|balance/)) return "Treasury: " + Number(data.treasury_realm || 0).toLocaleString() + " REALM\nRisk: " + (data.risk_level || "N/A") + " (Score: " + (data.risk_score || 0) + "/10)\nStaked: " + Number(data.total_staked || 0).toLocaleString() + " REALM";
+      if (ql.match(/risk|risco|score/)) return "Risk Level: " + (data.risk_level || "N/A") + "\nRisk Score: " + (data.risk_score || 0) + "/10";
+      return "Treasury: " + Number(data.treasury_realm || 0).toLocaleString() + " REALM | Risk: " + (data.risk_level || "N/A") + " | Proposals: " + (data.total_proposals || 0) + "\nAsk about: treasury balance, risk assessment, or proposals.";
+    },
+    suggestions: ["Treasury balance?", "Risk assessment?", "Staking info?", "Proposal count?"],
   },
 ];
 
@@ -465,7 +484,7 @@ function ChatModal({ isOpen, onClose, agent, agentData }) {
   );
 }
 
-// ─── Agents Section (v2 - 4 agents with modals) ──
+// ─── Agents Section (v2 - 5 agents with modals) ──
 function Agents() {
   const [agents, setAgents] = useState([]);
   const [loading, setLoading] = useState(true);
