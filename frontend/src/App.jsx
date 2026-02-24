@@ -252,6 +252,60 @@ const AGENTS_V2 = [
   },
 ];
 
+const AGENT_META = {
+  swap: {
+    registryId: 3,
+    capabilities: ["price_tracking", "swap_quotes", "trading_signals", "market_analysis"],
+    creator: "0x157A257228c5FebB7F332a8E492F0037f3A0526f",
+    chain: "Base",
+    apiBase: API + "/agents/swap",
+    agentWallet: null,
+    createdAt: "2025-01-15",
+    protocol: "ERC-8004",
+  },
+  rebalancer: {
+    registryId: 4,
+    capabilities: ["yield_analysis", "pool_tracking", "risk_assessment", "portfolio_allocation"],
+    creator: "0x157A257228c5FebB7F332a8E492F0037f3A0526f",
+    chain: "Base",
+    apiBase: API + "/agents/rebalancer",
+    agentWallet: null,
+    createdAt: "2025-01-15",
+    protocol: "ERC-8004",
+  },
+  governance: {
+    registryId: 5,
+    capabilities: ["proposal_monitoring", "voting_status", "treasury_analytics", "contract_info"],
+    creator: "0x157A257228c5FebB7F332a8E492F0037f3A0526f",
+    chain: "Base",
+    apiBase: API + "/agents/governance",
+    agentWallet: null,
+    createdAt: "2025-01-15",
+    protocol: "ERC-8004",
+  },
+  whale: {
+    registryId: 6,
+    capabilities: ["transfer_tracking", "wallet_profiling", "flow_analysis", "exchange_monitoring"],
+    creator: "0x157A257228c5FebB7F332a8E492F0037f3A0526f",
+    chain: "Base",
+    apiBase: API + "/agents/whale",
+    agentWallet: null,
+    createdAt: "2025-01-15",
+    protocol: "ERC-8004",
+  },
+  treasury: {
+    registryId: 4,
+    capabilities: ["treasury_monitoring", "risk_assessment", "governance_advisory", "financial_reporting"],
+    creator: "0x157A257228c5FebB7F332a8E492F0037f3A0526f",
+    chain: "Base",
+    apiBase: "https://treasury-agent.warlet-invest.workers.dev",
+    agentWallet: null,
+    createdAt: "2025-02-23",
+    protocol: "ERC-8004",
+  },
+};
+
+
 // ─── Modal Component ─────────────────────────────
 function Modal({ isOpen, onClose, icon, title, children }) {
   if (!isOpen) return null;
@@ -485,11 +539,348 @@ function ChatModal({ isOpen, onClose, agent, agentData }) {
 }
 
 // ─── Agents Section (v2 - 5 agents with modals) ──
+function AgentDetail({ agent, meta, onBack }) {
+  const [chatMsgs, setChatMsgs] = useState([]);
+  const [chatInput, setChatInput] = useState("");
+  const [chatLoading, setChatLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState("overview");
+  const [copied, setCopied] = useState("");
+  const chatEndRef = useRef(null);
+
+  useEffect(() => {
+    if (agent.greeting) {
+      setChatMsgs([{ role: "assistant", text: agent.greeting }]);
+    }
+  }, [agent.slug]);
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [chatMsgs]);
+
+  const copyText = (text, label) => {
+    navigator.clipboard.writeText(text);
+    setCopied(label);
+    setTimeout(() => setCopied(""), 2000);
+  };
+
+  const sendChat = async () => {
+    if (!chatInput.trim() || chatLoading) return;
+    const q = chatInput.trim();
+    setChatInput("");
+    setChatMsgs(prev => [...prev, { role: "user", text: q }]);
+    setChatLoading(true);
+    try {
+      const r = await fetch(`${API}/agents/${agent.slug}/api/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: q }),
+      });
+      const d = await r.json();
+      const reply = d.response || d.reply || d.message || (agent.fallback ? agent.fallback(q, agent.apiData) : "No response.");
+      setChatMsgs(prev => [...prev, { role: "assistant", text: reply }]);
+    } catch {
+      const fb = agent.fallback ? agent.fallback(q, agent.apiData) : "Connection error.";
+      setChatMsgs(prev => [...prev, { role: "assistant", text: fb }]);
+    }
+    setChatLoading(false);
+  };
+
+  const stats = agent.stats(agent.apiData);
+  const endpoints = [
+    { label: "API Data", url: `${API}/agents/${agent.slug}/api/data` },
+    { label: "Agent Card", url: `${API}/agents/${agent.slug}/.well-known/agent-card.json` },
+    { label: "MCP Manifest", url: `${API}/agents/${agent.slug}/mcp` },
+    { label: "Chat API", url: `${API}/agents/${agent.slug}/api/chat` },
+  ];
+  if (agent.slug === "treasury") {
+    endpoints.push({ label: "Treasury Worker", url: "https://treasury-agent.warlet-invest.workers.dev" });
+    endpoints.push({ label: "Health Check", url: "https://treasury-agent.warlet-invest.workers.dev/health" });
+  }
+
+  const tabs = ["overview", "chat", "endpoints", "metadata"];
+
+  return (
+    <div className="max-w-5xl mx-auto px-6 py-8">
+      {/* Back Button */}
+      <button onClick={onBack}
+        className="flex items-center gap-2 text-gray-400 hover:text-white text-sm mb-6 transition-colors">
+        <span>\u2190</span> Back to Agents
+      </button>
+
+      {/* Header */}
+      <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6 mb-6">
+        <div className="flex items-start gap-5">
+          <div className="text-5xl w-16 h-16 flex items-center justify-center rounded-xl"
+            style={{ background: agent.color + "18" }}>
+            {agent.icon}
+          </div>
+          <div className="flex-1">
+            <div className="flex items-center gap-3 flex-wrap">
+              <h1 className="text-2xl font-bold text-white">{agent.name}</h1>
+              <span className="text-xs font-bold px-2.5 py-1 rounded-md"
+                style={{ background: agent.color + "20", color: agent.color }}>
+                {agent.cat}
+              </span>
+              <span className="text-xs font-bold px-2.5 py-1 rounded-md bg-green-500/10 text-green-400">
+                \u25CF Active
+              </span>
+            </div>
+            <p className="text-gray-400 mt-2 text-sm leading-relaxed">{agent.desc}</p>
+            <div className="flex flex-wrap gap-4 mt-3 text-xs text-gray-500">
+              <span>Registry ID: <span className="text-gray-300">#{meta.registryId}</span></span>
+              <span>Chain: <span className="text-gray-300">{meta.chain}</span></span>
+              <span>Protocol: <span className="text-gray-300">{meta.protocol}</span></span>
+              <span>Created: <span className="text-gray-300">{meta.createdAt}</span></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div className="flex gap-1 mb-6 bg-gray-900 border border-gray-800 rounded-xl p-1">
+        {tabs.map(t => (
+          <button key={t} onClick={() => setActiveTab(t)}
+            className={`flex-1 py-2.5 px-4 rounded-lg text-sm font-medium transition-all capitalize ${
+              activeTab === t
+                ? "bg-violet-600 text-white"
+                : "text-gray-400 hover:text-white hover:bg-gray-800"
+            }`}>
+            {t}
+          </button>
+        ))}
+      </div>
+
+      {/* Tab: Overview */}
+      {activeTab === "overview" && (
+        <div className="space-y-6">
+          {/* Stats Grid */}
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+            <h3 className="text-white font-semibold text-sm mb-4">Live Stats</h3>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {stats.map((s, i) => (
+                <div key={i} className="bg-gray-800 rounded-lg p-3">
+                  <div className="text-gray-500 text-xs uppercase tracking-wide">{s.l}</div>
+                  <div className="text-white font-bold text-lg mt-1">{s.v}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Creator & Contract Info */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+              <h3 className="text-white font-semibold text-sm mb-4">Agent Info</h3>
+              <div className="space-y-3">
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-500 text-xs">Creator</span>
+                  <button onClick={() => copyText(meta.creator, "creator")}
+                    className="text-violet-400 text-xs font-mono hover:text-violet-300">
+                    {meta.creator.slice(0,6) + "..." + meta.creator.slice(-4)}
+                    {copied === "creator" ? " \u2713" : ""}
+                  </button>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-500 text-xs">Registry Contract</span>
+                  <button onClick={() => copyText(CONTRACTS.registry, "registry")}
+                    className="text-violet-400 text-xs font-mono hover:text-violet-300">
+                    {CONTRACTS.registry.slice(0,6) + "..." + CONTRACTS.registry.slice(-4)}
+                    {copied === "registry" ? " \u2713" : ""}
+                  </button>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-500 text-xs">Chain</span>
+                  <span className="text-gray-300 text-xs">{meta.chain} (ID: 8453)</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-500 text-xs">Registry ID</span>
+                  <span className="text-gray-300 text-xs">#{meta.registryId}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+              <h3 className="text-white font-semibold text-sm mb-4">Capabilities</h3>
+              <div className="flex flex-wrap gap-2">
+                {meta.capabilities.map((c, i) => (
+                  <span key={i} className="text-xs px-3 py-1.5 rounded-lg bg-gray-800 text-gray-300 border border-gray-700">
+                    {c.replace(/_/g, " ")}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Quick Actions */}
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+            <h3 className="text-white font-semibold text-sm mb-4">Quick Actions</h3>
+            <div className="flex flex-wrap gap-3">
+              <button onClick={() => setActiveTab("chat")}
+                className="px-5 py-2.5 rounded-lg text-sm font-semibold text-white hover:opacity-90"
+                style={{ background: agent.color }}>
+                Start Chat
+              </button>
+              <a href={`${API}/agents/${agent.slug}/api/data`} target="_blank" rel="noopener noreferrer"
+                className="px-5 py-2.5 rounded-lg text-sm font-semibold bg-gray-800 text-gray-300 border border-gray-700 hover:border-gray-600 no-underline">
+                View API Data
+              </a>
+              <a href={`${API}/agents/${agent.slug}/.well-known/agent-card.json`} target="_blank" rel="noopener noreferrer"
+                className="px-5 py-2.5 rounded-lg text-sm font-semibold bg-gray-800 text-gray-300 border border-gray-700 hover:border-gray-600 no-underline">
+                Agent Card JSON
+              </a>
+              <a href={`https://basescan.org/address/${meta.creator}`} target="_blank" rel="noopener noreferrer"
+                className="px-5 py-2.5 rounded-lg text-sm font-semibold bg-gray-800 text-gray-300 border border-gray-700 hover:border-gray-600 no-underline">
+                View on BaseScan
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Tab: Chat */}
+      {activeTab === "chat" && (
+        <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+          <div className="p-4 border-b border-gray-800 flex items-center gap-3">
+            <span className="text-xl">{agent.icon}</span>
+            <div>
+              <div className="text-white font-semibold text-sm">{agent.name}</div>
+              <div className="text-green-400 text-xs">Online - Powered by Workers AI</div>
+            </div>
+          </div>
+          <div className="h-96 overflow-y-auto p-4 space-y-3" style={{ background: "rgba(0,0,0,0.2)" }}>
+            {chatMsgs.map((m, i) => (
+              <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
+                <div className={`max-w-[80%] px-4 py-2.5 rounded-xl text-sm whitespace-pre-wrap ${
+                  m.role === "user"
+                    ? "bg-violet-600 text-white rounded-br-sm"
+                    : "bg-gray-800 text-gray-200 rounded-bl-sm"
+                }`}>
+                  {m.text}
+                </div>
+              </div>
+            ))}
+            {chatLoading && (
+              <div className="flex justify-start">
+                <div className="bg-gray-800 text-gray-400 px-4 py-2.5 rounded-xl text-sm rounded-bl-sm">
+                  Thinking...
+                </div>
+              </div>
+            )}
+            <div ref={chatEndRef} />
+          </div>
+          {agent.suggestions && chatMsgs.length <= 1 && (
+            <div className="px-4 py-2 flex flex-wrap gap-2 border-t border-gray-800/50">
+              {agent.suggestions.map((s, i) => (
+                <button key={i} onClick={() => { setChatInput(s); }}
+                  className="text-xs px-3 py-1.5 rounded-full bg-violet-600/10 text-violet-400 border border-violet-500/20 hover:bg-violet-600/20">
+                  {s}
+                </button>
+              ))}
+            </div>
+          )}
+          <div className="p-4 border-t border-gray-800 flex gap-3">
+            <input value={chatInput} onChange={(e) => setChatInput(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && sendChat()}
+              placeholder={`Ask ${agent.name} anything...`}
+              className="flex-1 bg-gray-800 border border-gray-700 rounded-xl px-4 py-2.5 text-white text-sm outline-none focus:border-violet-500"
+            />
+            <button onClick={sendChat} disabled={chatLoading || !chatInput.trim()}
+              className="px-5 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-40 hover:opacity-90"
+              style={{ background: agent.color }}>
+              Send
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Tab: Endpoints */}
+      {activeTab === "endpoints" && (
+        <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+          <h3 className="text-white font-semibold text-sm mb-4">API Endpoints</h3>
+          <div className="space-y-3">
+            {endpoints.map((ep, i) => (
+              <div key={i} className="flex items-center justify-between bg-gray-800 rounded-lg p-3">
+                <div>
+                  <div className="text-white text-sm font-medium">{ep.label}</div>
+                  <div className="text-gray-500 text-xs font-mono mt-0.5 break-all">{ep.url}</div>
+                </div>
+                <div className="flex gap-2 shrink-0 ml-3">
+                  <button onClick={() => copyText(ep.url, ep.label)}
+                    className="px-3 py-1.5 rounded-lg text-xs bg-gray-700 text-gray-300 hover:bg-gray-600">
+                    {copied === ep.label ? "Copied!" : "Copy"}
+                  </button>
+                  <a href={ep.url} target="_blank" rel="noopener noreferrer"
+                    className="px-3 py-1.5 rounded-lg text-xs bg-violet-600/20 text-violet-400 hover:bg-violet-600/30 no-underline">
+                    Open
+                  </a>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Tab: Metadata */}
+      {activeTab === "metadata" && (
+        <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-white font-semibold text-sm">On-Chain Metadata</h3>
+            <button onClick={() => copyText(JSON.stringify({
+              name: agent.name,
+              description: agent.desc,
+              category: agent.cat,
+              registryId: meta.registryId,
+              chain: meta.chain,
+              protocol: meta.protocol,
+              creator: meta.creator,
+              capabilities: meta.capabilities,
+              endpoints: {
+                api: `${API}/agents/${agent.slug}/api/data`,
+                chat: `${API}/agents/${agent.slug}/api/chat`,
+                agentCard: `${API}/agents/${agent.slug}/.well-known/agent-card.json`,
+                mcp: `${API}/agents/${agent.slug}/mcp`,
+              },
+            }, null, 2), "json")}
+              className="text-xs px-3 py-1.5 rounded-lg bg-gray-800 text-gray-400 hover:text-white">
+              {copied === "json" ? "Copied!" : "Copy JSON"}
+            </button>
+          </div>
+          <pre className="bg-black rounded-lg p-4 text-xs text-gray-300 overflow-x-auto leading-relaxed">{
+            JSON.stringify({
+              name: agent.name,
+              description: agent.desc,
+              category: agent.cat,
+              registryId: meta.registryId,
+              chain: meta.chain,
+              chainId: 8453,
+              protocol: meta.protocol,
+              creator: meta.creator,
+              createdAt: meta.createdAt,
+              capabilities: meta.capabilities,
+              contracts: {
+                registry: CONTRACTS.registry,
+                router: CONTRACTS.router,
+                realm: CONTRACTS.realm,
+              },
+              endpoints: {
+                api: `${API}/agents/${agent.slug}/api/data`,
+                chat: `${API}/agents/${agent.slug}/api/chat`,
+                agentCard: `${API}/agents/${agent.slug}/.well-known/agent-card.json`,
+                mcp: `${API}/agents/${agent.slug}/mcp`,
+              },
+            }, null, 2)
+          }</pre>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Agents() {
   const [agents, setAgents] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+  const [selectedSlug, setSelectedSlug] = useState(null);
   const [lastUpdate, setLastUpdate] = useState("");
-  const [modals, setModals] = useState({ chat: null, card: null, api: null, mcp: null });
   const initialRef = useRef(false);
 
   const loadAgents = async () => {
@@ -520,91 +911,112 @@ function Agents() {
     }
   }, []);
 
-  const currentChatAgent = agents.find(a => a.slug === modals.chat);
+  // Detail view
+  if (selectedSlug) {
+    const agent = agents.find(a => a.slug === selectedSlug);
+    if (agent) {
+      return <AgentDetail agent={agent} meta={AGENT_META[agent.slug] || {}} onBack={() => setSelectedSlug(null)} />;
+    }
+  }
+
+  // Filter
+  const filtered = agents.filter(a =>
+    !search || a.name.toLowerCase().includes(search.toLowerCase()) ||
+    a.cat.toLowerCase().includes(search.toLowerCase()) ||
+    a.slug.toLowerCase().includes(search.toLowerCase()) ||
+    a.desc.toLowerCase().includes(search.toLowerCase())
+  );
 
   return (
     <div className="max-w-6xl mx-auto px-6 py-12">
-      <div className="flex items-center justify-between mb-8">
+      {/* Header */}
+      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 mb-8">
         <div>
           <div className="inline-flex items-center gap-2 bg-green-950 border border-green-800 rounded-full px-3 py-1 mb-2">
             <span className="w-1.5 h-1.5 bg-green-400 rounded-full animate-pulse" />
             <span className="text-green-400 text-xs">Live Data</span>
           </div>
           <h2 className="text-2xl font-bold text-white">AI Agents</h2>
-          <p className="text-gray-500 text-sm mt-1">Interact with specialized agents powered by Workers AI</p>
+          <p className="text-gray-500 text-sm mt-1">{AGENTS_V2.length} autonomous agents with A2A & MCP endpoints</p>
         </div>
-        <div className="flex items-center gap-4">
-          <span className="text-gray-600 text-xs">{lastUpdate ? `Updated ${lastUpdate}` : ""}</span>
+        <div className="flex items-center gap-3 w-full md:w-auto">
+          <div className="relative flex-1 md:flex-none">
+            <input value={search} onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search agents..."
+              className="w-full md:w-64 bg-gray-900 border border-gray-700 rounded-xl px-4 py-2.5 pl-10 text-white text-sm outline-none focus:border-violet-500"
+            />
+            <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-500 text-sm">🔍</span>
+          </div>
           <button onClick={loadAgents} disabled={loading}
-            className="px-4 py-2 bg-violet-600/20 border border-violet-500/30 text-violet-300 text-sm font-semibold rounded-lg hover:bg-violet-600/30 disabled:opacity-50">
-            {loading ? "Loading..." : "Refresh"}
+            className="px-4 py-2.5 bg-violet-600/20 border border-violet-500/30 text-violet-300 text-sm font-semibold rounded-xl hover:bg-violet-600/30 disabled:opacity-50 shrink-0">
+            {loading ? "..." : "\u21BB"}
           </button>
         </div>
       </div>
 
+      {/* Agent Grid */}
       {loading && agents.length === 0 ? (
-        <div className="text-center py-12 text-gray-400">Loading agents...</div>
+        <div className="text-center py-16 text-gray-400">Loading agents...</div>
+      ) : filtered.length === 0 ? (
+        <div className="text-center py-16 text-gray-400">No agents match your search.</div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-          {agents.map(agent => (
-            <div key={agent.slug} className="bg-gray-900 border border-gray-800 rounded-xl p-5 hover:border-violet-500/30 transition-all">
-              <div className="flex items-start gap-4 mb-4">
-                <span className="text-4xl">{agent.icon}</span>
-                <div className="flex-1">
-                  <h3 className="text-white font-bold text-lg">{agent.name}</h3>
-                  <div className="flex gap-2 mt-1.5">
-                    <span className="text-xs font-semibold px-2 py-0.5 rounded bg-violet-400/10 text-violet-400">{agent.cat}</span>
-                    <span className="text-xs font-semibold px-2 py-0.5 rounded bg-green-400/10 text-green-400">Online</span>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {filtered.map(agent => {
+            const stats = agent.stats(agent.apiData);
+            const meta = AGENT_META[agent.slug] || {};
+            return (
+              <div key={agent.slug}
+                onClick={() => setSelectedSlug(agent.slug)}
+                className="bg-gray-900 border border-gray-800 rounded-xl p-5 hover:border-violet-500/30 transition-all cursor-pointer group">
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="text-3xl w-12 h-12 flex items-center justify-center rounded-lg"
+                    style={{ background: agent.color + "15" }}>
+                    {agent.icon}
                   </div>
+                  <div className="flex-1 min-w-0">
+                    <h3 className="text-white font-bold text-sm group-hover:text-violet-300 transition-colors truncate">{agent.name}</h3>
+                    <div className="flex gap-1.5 mt-1">
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded"
+                        style={{ background: agent.color + "18", color: agent.color }}>
+                        {agent.cat}
+                      </span>
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-green-500/10 text-green-400">
+                        Active
+                      </span>
+                      {meta.registryId && (
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-gray-800 text-gray-400">
+                          #{meta.registryId}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <span className="text-gray-600 group-hover:text-gray-400 transition-colors text-lg">\u2192</span>
+                </div>
+                <p className="text-gray-500 text-xs mb-3 leading-relaxed">{agent.desc}</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {stats.slice(0, 2).map((s, i) => (
+                    <div key={i} className="bg-gray-800/50 rounded-lg px-3 py-2">
+                      <div className="text-gray-600 text-[10px] uppercase">{s.l}</div>
+                      <div className="text-white font-semibold text-xs mt-0.5">{s.v}</div>
+                    </div>
+                  ))}
                 </div>
               </div>
-              <p className="text-gray-400 text-sm mb-4">{agent.desc}</p>
-
-              {/* Stats */}
-              <div className="grid grid-cols-2 gap-3 mb-5">
-                {agent.stats(agent.apiData).map((s, i) => (
-                  <div key={i} className="bg-gray-800 rounded-lg p-3">
-                    <div className="text-gray-500 text-xs">{s.l}</div>
-                    <div className="text-white font-semibold text-sm mt-0.5">{s.v}</div>
-                  </div>
-                ))}
-              </div>
-
-              {/* Action Buttons */}
-              <div className="flex gap-2">
-                <button onClick={() => setModals({ ...modals, chat: agent.slug })}
-                  className="flex-1 text-white px-3 py-2 rounded-lg text-sm font-medium hover:opacity-90 transition-opacity"
-                  style={{ backgroundColor: agent.color }}>
-                  AI Chat
-                </button>
-                <button onClick={() => setModals({ ...modals, card: agent.slug })}
-                  className="flex-1 bg-gray-800 hover:bg-gray-700 text-white px-3 py-2 rounded-lg text-sm border border-gray-700">
-                  Card
-                </button>
-                <button onClick={() => setModals({ ...modals, api: agent.slug })}
-                  className="flex-1 bg-gray-800 hover:bg-gray-700 text-white px-3 py-2 rounded-lg text-sm border border-gray-700">
-                  Data
-                </button>
-                <button onClick={() => setModals({ ...modals, mcp: agent.slug })}
-                  className="flex-1 bg-gray-800 hover:bg-gray-700 text-white px-3 py-2 rounded-lg text-sm border border-gray-700">
-                  MCP
-                </button>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
-      {/* Modals */}
-      {currentChatAgent && <ChatModal isOpen={!!modals.chat} onClose={() => setModals({ ...modals, chat: null })} agent={currentChatAgent} agentData={currentChatAgent.apiData} />}
-      <AgentCardModal isOpen={!!modals.card} onClose={() => setModals({ ...modals, card: null })} slug={modals.card} />
-      <ApiDataModal isOpen={!!modals.api} onClose={() => setModals({ ...modals, api: null })} slug={modals.api} />
-      <McpModal isOpen={!!modals.mcp} onClose={() => setModals({ ...modals, mcp: null })} slug={modals.mcp} />
+      {/* Last update */}
+      {lastUpdate && (
+        <div className="text-center mt-6 text-gray-600 text-xs">
+          Last updated: {lastUpdate}
+        </div>
+      )}
     </div>
   );
 }
 
-// ─── Explore Section ───────────────────────────────
 function Explore() {
   const cards = [
     {icon:"\uD83E\uDD16",t:"Agent Registry",d:"Register AI agents as ERC-721 NFTs with on-chain identity, reputation tracking, and verification."},
